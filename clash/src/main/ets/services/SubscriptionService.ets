@@ -148,7 +148,7 @@ export class SubscriptionService {
       httpRequest.destroy();
     } catch (e) {
       Logger.error('Failed to fetch subscription: %{public}s', String(e));
-      throw e;
+      throw new Error(String(e));
     }
   }
 

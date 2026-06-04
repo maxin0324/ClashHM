@@ -1,7 +1,5 @@
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { Want } from '@kit.AbilityKit';
-import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
-import { wantAgent, WantAgent } from '@kit.AbilityKit';
 import { Logger } from '../common/Logger';
 import clashNapi from 'libclash.so';
 
@@ -11,8 +9,6 @@ export default class ClashVpnAbility extends VpnExtensionAbility {
 
   onCreate(want: Want): void {
     Logger.info('ClashVpnAbility onCreate');
-
-    this.startBackgroundTask();
 
     this.vpnConnection = vpnExtension.createVpnConnection(this.context);
 
@@ -48,42 +44,10 @@ export default class ClashVpnAbility extends VpnExtensionAbility {
 
   onDestroy(): void {
     Logger.info('ClashVpnAbility onDestroy');
-    this.stopBackgroundTask();
     if (this.vpnConnection) {
       this.vpnConnection.destroy();
       this.vpnConnection = null;
     }
     this.tunFd = -1;
-  }
-
-  private startBackgroundTask(): void {
-    try {
-      const wantAgentInfo: wantAgent.WantAgentInfo = {
-        wants: [{
-          bundleName: this.context.abilityInfo.bundleName,
-          abilityName: 'ClashAbility',
-        }],
-        actionType: wantAgent.OperationType.START_ABILITY,
-        requestCode: 0,
-        wantAgentFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG],
-      };
-
-      wantAgent.getWantAgent(wantAgentInfo).then((agent: WantAgent) => {
-        backgroundTaskManager.startBackgroundRunning(this.context, backgroundTaskManager.BackgroundMode.DATA_TRANSFER, agent);
-        Logger.info('Background task started');
-      }).catch((err: Error) => {
-        Logger.error('Failed to get want agent: %{public}s', err.message);
-      });
-    } catch (e) {
-      Logger.error('Failed to start background task: %{public}s', String(e));
-    }
-  }
-
-  private stopBackgroundTask(): void {
-    try {
-      backgroundTaskManager.stopBackgroundRunning(this.context);
-    } catch (_e) {
-      // ignore
-    }
   }
 }

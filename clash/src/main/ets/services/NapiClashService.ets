@@ -25,6 +25,8 @@ interface NapiGroupInfo {
 interface NapiTraffic {
   uploadSpeed: number;
   downloadSpeed: number;
+  uploadTotal: number;
+  downloadTotal: number;
 }
 
 interface NapiConnection {
@@ -41,7 +43,11 @@ interface NapiConnection {
   proxyChain: string[];
   uploadBytes: number;
   downloadBytes: number;
-  start: string;
+}
+
+interface NapiResult {
+  status: string;
+  error: string;
 }
 
 export class NapiClashService implements IClashService {
@@ -66,10 +72,10 @@ export class NapiClashService implements IClashService {
     this.state = ConnectState.CONNECTING;
     try {
       const result = clashNapi.startFile(configPath);
-      const parsed = JSON.parse(result) as Record<string, string>;
-      if (parsed['error']) {
+      const parsed: NapiResult = JSON.parse(result) as NapiResult;
+      if (parsed.error) {
         this.state = ConnectState.DISCONNECTED;
-        throw new Error(parsed['error']);
+        throw new Error(parsed.error);
       }
       this.state = ConnectState.CONNECTED;
       this.prevUpload = 0;
@@ -80,7 +86,10 @@ export class NapiClashService implements IClashService {
       Logger.info('Clash engine started');
     } catch (e) {
       this.state = ConnectState.DISCONNECTED;
-      throw e;
+      if (e instanceof Error) {
+        throw e;
+      }
+      throw new Error(String(e));
     }
   }
 
@@ -94,16 +103,16 @@ export class NapiClashService implements IClashService {
   async reload(configPath: string): Promise<void> {
     clashNapi.stop();
     const result = clashNapi.startFile(configPath);
-    const parsed = JSON.parse(result) as Record<string, string>;
-    if (parsed['error']) {
-      throw new Error(parsed['error']);
+    const parsed: NapiResult = JSON.parse(result) as NapiResult;
+    if (parsed.error) {
+      throw new Error(parsed.error);
     }
   }
 
   getProxyGroups(): ProxyGroup[] {
     try {
       const json = clashNapi.getProxies();
-      const groups = JSON.parse(json) as NapiGroupInfo[];
+      const groups: NapiGroupInfo[] = JSON.parse(json) as NapiGroupInfo[];
       this.cachedGroups = groups.map((g: NapiGroupInfo): ProxyGroup => {
         return {
           name: g.name,
@@ -133,7 +142,7 @@ export class NapiClashService implements IClashService {
   async selectProxy(groupName: string, proxyName: string): Promise<void> {
     const result = clashNapi.selectProxy(groupName, proxyName);
     if (result !== 0) {
-      Logger.error('Failed to select proxy: %{public}d', String(result));
+      Logger.error('Failed to select proxy: %{public}s', String(result));
     }
   }
 
@@ -160,20 +169,20 @@ export class NapiClashService implements IClashService {
   getTraffic(): TrafficData {
     try {
       const json = clashNapi.getTraffic();
-      const t = JSON.parse(json) as NapiTraffic;
+      const t: NapiTraffic = JSON.parse(json) as NapiTraffic;
 
       let uploadSpeed = 0;
       let downloadSpeed = 0;
       if (this.prevUpload > 0) {
-        uploadSpeed = t.uploadSpeed - this.prevUpload;
-        downloadSpeed = t.downloadSpeed - this.prevDownload;
+        uploadSpeed = t.uploadTotal - this.prevUpload;
+        downloadSpeed = t.downloadTotal - this.prevDownload;
         if (uploadSpeed < 0) uploadSpeed = 0;
         if (downloadSpeed < 0) downloadSpeed = 0;
       }
       this.sessionUpload += uploadSpeed;
       this.sessionDownload += downloadSpeed;
-      this.prevUpload = t.uploadSpeed;
-      this.prevDownload = t.downloadSpeed;
+      this.prevUpload = t.uploadTotal;
+      this.prevDownload = t.downloadTotal;
 
       this.lastTraffic = {
         uploadSpeed: uploadSpeed,
@@ -185,7 +194,7 @@ export class NapiClashService implements IClashService {
 
       try {
         const connJson = clashNapi.getConnections();
-        const conns = JSON.parse(connJson) as NapiConnection[];
+        const conns: NapiConnection[] = JSON.parse(connJson) as NapiConnection[];
         this.lastTraffic.activeConnections = conns.length;
       } catch (_e) {
         // ignore
@@ -200,7 +209,7 @@ export class NapiClashService implements IClashService {
   getConnections(): LogEntry[] {
     try {
       const json = clashNapi.getConnections();
-      const conns = JSON.parse(json) as NapiConnection[];
+      const conns: NapiConnection[] = JSON.parse(json) as NapiConnection[];
       return conns.map((c: NapiConnection): LogEntry => {
         return {
           id: c.id,
@@ -272,13 +281,9 @@ export class NapiClashService implements IClashService {
   }
 
   private mapLogType(network: string): LogType {
-    switch (network.toUpperCase()) {
-      case 'UDP':
-        return LogType.UDP;
-      case 'TCP':
-        return LogType.TCP;
-      default:
-        return LogType.TCP;
+    if (network.toUpperCase() === 'UDP') {
+      return LogType.UDP;
     }
+    return LogType.TCP;
   }
 }

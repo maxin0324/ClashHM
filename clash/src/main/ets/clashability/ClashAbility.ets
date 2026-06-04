@@ -2,6 +2,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { vpnExtension } from '@kit.NetworkKit';
+import clashNapi from 'libclash.so';
 
 const DOMAIN = 0x0001;
 const TAG = 'ClashHM';
@@ -19,17 +20,12 @@ export default class ClashAbility extends UIAbility {
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'ClashAbility onDestroy');
 
-    // Stop mihomo engine via NAPI
     try {
-      const clashNapi = (globalThis as Record<string, Object>)['clashNapi'];
-      if (clashNapi && typeof (clashNapi as Record<string, Function>)['stop'] === 'function') {
-        (clashNapi as Record<string, Function>)['stop']();
-      }
+      clashNapi.stop();
     } catch (_e) {
       // engine may not be running
     }
 
-    // Stop VPN Extension
     try {
       const want: Want = {
         bundleName: this.context.abilityInfo.bundleName,
