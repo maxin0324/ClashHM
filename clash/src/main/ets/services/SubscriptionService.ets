@@ -135,10 +135,15 @@ export class SubscriptionService {
         readTimeout: 30000,
       });
 
-      Logger.info('fetch step 3: response code %{public}d', String(response.responseCode));
-      if (response.responseCode === http.ResponseCode.OK) {
+      Logger.info('fetch step 3: response code %{public}s', String(response.responseCode));
+      const code: number = response.responseCode;
+      if (code >= 200 && code < 400) {
         let content = response.result as string;
-        Logger.info('fetch step 4: content length %{public}d', String(content.length));
+        if (!content || content.length === 0) {
+          Logger.error('fetch: empty response body');
+          return;
+        }
+        Logger.info('fetch step 4: content length %{public}s', String(content.length));
 
         Logger.info('fetch step 5: writing to file %{public}s', sub.filePath);
         const file = fileIo.openSync(sub.filePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
