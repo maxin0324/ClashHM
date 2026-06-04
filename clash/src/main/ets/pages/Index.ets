@@ -13,6 +13,7 @@ import { Logger } from '../common/Logger';
 struct Index {
   @State currentIndex: number = 0;
   @State engineMode: string = '';
+  @State errorDetail: string = '';
   private tabsController: TabsController = new TabsController();
   private tabTitles: string[] = ['Home', 'Proxy', 'Subscribe', 'Settings'];
   private tabIcons: string[] = ['⌂', '⇋', '☰', '⚙'];
@@ -25,7 +26,9 @@ struct Index {
       this.engineMode = 'mihomo';
       Logger.info('Using NapiClashService (mihomo engine)');
     } catch (e) {
-      Logger.error('NapiClashService failed, falling back to Mock: %{public}s', String(e));
+      const errMsg = (e instanceof Error) ? e.message : String(e);
+      Logger.error('NapiClashService failed: %{public}s', errMsg);
+      this.errorDetail = errMsg;
       const mockService = new MockClashService();
       setClashService(mockService);
       this.engineMode = 'mock';
@@ -56,15 +59,23 @@ struct Index {
   build() {
     Column() {
       if (this.engineMode === 'mock') {
-        Row() {
+        Column() {
           Text('Mock Mode — native engine not loaded')
             .fontSize(11)
             .fontColor(Color.White)
+          if (this.errorDetail) {
+            Text(this.errorDetail)
+              .fontSize(9)
+              .fontColor(Color.White)
+              .opacity(0.8)
+              .maxLines(3)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
         }
         .width('100%')
         .backgroundColor($r('app.color.connecting_color'))
-        .justifyContent(FlexAlign.Center)
-        .padding({ top: 2, bottom: 2 })
+        .alignItems(HorizontalAlign.Center)
+        .padding({ top: 4, bottom: 4, left: 8, right: 8 })
       }
 
       Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
