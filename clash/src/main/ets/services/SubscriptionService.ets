@@ -152,8 +152,14 @@ export class SubscriptionService {
         Logger.info('fetch step 6: file written');
 
         sub.lastUpdate = Date.now();
-        this.countNodes(sub, content);
-        Logger.info('fetch step 7: done, nodes=%{public}d', String(sub.nodeCount));
+        try {
+          if (typeof content === 'string') {
+            this.countNodes(sub, content);
+          }
+        } catch (_e) {
+          // node counting is optional
+        }
+        Logger.info('fetch step 7: done, nodes=%{public}s', String(sub.nodeCount));
       }
       httpRequest.destroy();
     } catch (e) {
