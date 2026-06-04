@@ -129,7 +129,7 @@ export class SubscriptionService {
       const response = await httpRequest.request(sub.url, {
         method: http.RequestMethod.GET,
         header: {
-          'User-Agent': 'ClashHM/1.0.0 (HarmonyOS)',
+          'User-Agent': 'clash-verge/v2.2.0',
         },
         connectTimeout: 15000,
         readTimeout: 30000,
