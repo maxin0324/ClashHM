@@ -131,6 +131,7 @@ export class SubscriptionService {
         header: {
           'User-Agent': 'clash-verge/v2.2.0',
         },
+        expectDataType: http.HttpDataType.STRING,
         connectTimeout: 15000,
         readTimeout: 30000,
       });
