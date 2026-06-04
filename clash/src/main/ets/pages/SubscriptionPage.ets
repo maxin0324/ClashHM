@@ -16,7 +16,7 @@ export struct SubscriptionPage {
   private subService: SubscriptionService | null = null;
 
   aboutToAppear(): void {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     this.subService = new SubscriptionService(context);
     this.loadSubscriptions();
   }

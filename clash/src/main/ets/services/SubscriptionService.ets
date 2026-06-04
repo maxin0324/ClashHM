@@ -16,7 +16,12 @@ export class SubscriptionService {
   }
 
   async init(): Promise<void> {
-    this.store = await preferences.getPreferences(this.context, 'subscriptions_store');
+    try {
+      this.store = await preferences.getPreferences(this.context, 'subscriptions_store');
+    } catch (e) {
+      Logger.error('Failed to get preferences store: %{public}s', String(e));
+      return;
+    }
     await this.loadSubscriptions();
   }
 
@@ -24,8 +29,8 @@ export class SubscriptionService {
     if (!this.store) {
       return;
     }
-    const data = await this.store.get(Constants.SUBSCRIPTIONS_KEY, '[]') as string;
     try {
+      const data = await this.store.get(Constants.SUBSCRIPTIONS_KEY, '[]') as string;
       this.subscriptions = JSON.parse(data) as Subscription[];
     } catch (e) {
       Logger.error('Failed to parse subscriptions: %{public}s', String(e));
@@ -37,8 +42,12 @@ export class SubscriptionService {
     if (!this.store) {
       return;
     }
-    await this.store.put(Constants.SUBSCRIPTIONS_KEY, JSON.stringify(this.subscriptions));
-    await this.store.flush();
+    try {
+      await this.store.put(Constants.SUBSCRIPTIONS_KEY, JSON.stringify(this.subscriptions));
+      await this.store.flush();
+    } catch (e) {
+      Logger.error('Failed to save subscriptions: %{public}s', String(e));
+    }
   }
 
   getSubscriptions(): Subscription[] {

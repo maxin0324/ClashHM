@@ -13,7 +13,7 @@ export struct SettingsPage {
   }
 
   private async loadSettings(): Promise<void> {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     await this.settingsService.init(context);
     this.settings = this.settingsService.getSettings();
     this.isLoaded = true;

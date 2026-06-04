@@ -1,7 +1,6 @@
 import { getClashService, IClashService } from '../services/ClashService';
 import { LogEntry } from '../models/LogEntry';
 import { LogItem, LogItemModel } from '../components/LogItem';
-import { router } from '@kit.ArkUI';
 
 @Entry
 @Component
@@ -74,7 +73,7 @@ struct LogPage {
           .fontSize(22)
           .fontColor($r('app.color.text_primary'))
           .onClick(() => {
-            router.back();
+            this.getUIContext().getRouter().back();
           })
 
         Text($r('app.string.logs'))

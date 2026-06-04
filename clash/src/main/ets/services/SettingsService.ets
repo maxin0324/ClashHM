@@ -9,7 +9,12 @@ export class SettingsService {
   private settings: AppSettings = createDefaultSettings();
 
   async init(context: common.UIAbilityContext): Promise<void> {
-    this.store = await preferences.getPreferences(context, 'settings_store');
+    try {
+      this.store = await preferences.getPreferences(context, 'settings_store');
+    } catch (e) {
+      Logger.error('Failed to get settings store: %{public}s', String(e));
+      return;
+    }
     await this.load();
   }
 

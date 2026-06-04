@@ -45,7 +45,11 @@ export default class ClashVpnAbility extends VpnExtensionAbility {
   onDestroy(): void {
     Logger.info('ClashVpnAbility onDestroy');
     if (this.vpnConnection) {
-      this.vpnConnection.destroy();
+      try {
+        this.vpnConnection.destroy();
+      } catch (e) {
+        Logger.error('Failed to destroy VPN connection: %{public}s', String(e));
+      }
       this.vpnConnection = null;
     }
     this.tunFd = -1;

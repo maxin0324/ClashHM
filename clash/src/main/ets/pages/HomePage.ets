@@ -8,7 +8,7 @@ import { TrafficMonitor } from '../services/TrafficMonitor';
 import { SubscriptionService } from '../services/SubscriptionService';
 import { vpnExtension } from '@kit.NetworkKit';
 import { common, Want } from '@kit.AbilityKit';
-import { router } from '@kit.ArkUI';
+
 import { Logger } from '../common/Logger';
 
 @Component
@@ -47,7 +47,7 @@ export struct HomePage {
       this.connectState = ConnectState.CONNECTING;
       this.errorMsg = '';
       try {
-        const context = getContext(this) as common.UIAbilityContext;
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
 
         // Find active subscription config first
         const subService = new SubscriptionService(context);
@@ -92,7 +92,7 @@ export struct HomePage {
 
       // Stop VPN Extension
       try {
-        const context = getContext(this) as common.UIAbilityContext;
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
         const want: Want = {
           bundleName: context.abilityInfo.bundleName,
           abilityName: 'ClashVpnAbility',
@@ -126,7 +126,7 @@ export struct HomePage {
           .fontSize(24)
           .fontColor($r('app.color.text_secondary'))
           .onClick(() => {
-            router.pushUrl({ url: 'pages/LogPage' });
+            this.getUIContext().getRouter().pushUrl({ url: 'pages/LogPage' });
           })
       }
       .width('100%')

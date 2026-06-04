@@ -20,7 +20,7 @@ struct Index {
 
   aboutToAppear(): void {
     try {
-      const context = getContext(this) as common.UIAbilityContext;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const service = new NapiClashService(context);
       setClashService(service);
       this.engineMode = 'mihomo';
