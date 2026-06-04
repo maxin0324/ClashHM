@@ -2,10 +2,10 @@
 #include <cstring>
 #include <cstdlib>
 #include <dlfcn.h>
+#include <link.h>
+#include <string>
 
-// Function pointers for libmihomo.so exports
 typedef char* (*fn_clash_init)(char*);
-typedef char* (*fn_clash_start)(char*, int);
 typedef char* (*fn_clash_start_file)(char*);
 typedef void  (*fn_clash_stop)();
 typedef int   (*fn_clash_is_running)();
@@ -22,7 +22,6 @@ typedef void  (*fn_clash_set_tun_fd)(int);
 typedef void  (*fn_clash_free_string)(char*);
 
 static fn_clash_init               p_ClashInit = nullptr;
-static fn_clash_start              p_ClashStart = nullptr;
 static fn_clash_start_file         p_ClashStartFile = nullptr;
 static fn_clash_stop               p_ClashStop = nullptr;
 static fn_clash_is_running         p_ClashIsRunning = nullptr;
@@ -40,10 +39,16 @@ static fn_clash_free_string        p_ClashFreeString = nullptr;
 
 static void* mihomoLib = nullptr;
 
-static napi_value returnString(napi_env env, const char* str) {
-    napi_value result;
-    napi_create_string_utf8(env, str, strlen(str), &result);
-    return result;
+static std::string findLibDir() {
+    Dl_info info;
+    if (dladdr((void*)findLibDir, &info) && info.dli_fname) {
+        std::string path(info.dli_fname);
+        size_t pos = path.rfind('/');
+        if (pos != std::string::npos) {
+            return path.substr(0, pos);
+        }
+    }
+    return "";
 }
 
 static napi_value returnGoString(napi_env env, char* str) {
@@ -71,7 +76,6 @@ static napi_value NapiClashInit(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* homeDir = getNapiString(env, args[0]);
     char* result = p_ClashInit ? p_ClashInit(homeDir) : nullptr;
     free(homeDir);
@@ -82,7 +86,6 @@ static napi_value NapiClashStartFile(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* path = getNapiString(env, args[0]);
     char* result = p_ClashStartFile ? p_ClashStartFile(path) : nullptr;
     free(path);
@@ -112,7 +115,6 @@ static napi_value NapiClashSelectProxy(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* group = getNapiString(env, args[0]);
     char* proxy = getNapiString(env, args[1]);
     napi_value result;
@@ -127,12 +129,10 @@ static napi_value NapiClashTestDelay(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* name = getNapiString(env, args[0]);
     char* url = getNapiString(env, args[1]);
     int timeout = 5000;
     napi_get_value_int32(env, args[2], &timeout);
-
     napi_value result;
     int delay = p_ClashTestDelay ? p_ClashTestDelay(name, url, timeout) : -1;
     napi_create_int32(env, delay, &result);
@@ -162,7 +162,6 @@ static napi_value NapiClashCloseConnection(napi_env env, napi_callback_info info
     size_t argc = 1;
     napi_value args[1];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* id = getNapiString(env, args[0]);
     if (p_ClashCloseConnection) p_ClashCloseConnection(id);
     free(id);
@@ -180,7 +179,6 @@ static napi_value NapiClashSetMode(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     char* mode = getNapiString(env, args[0]);
     if (p_ClashSetMode) p_ClashSetMode(mode);
     free(mode);
@@ -193,7 +191,6 @@ static napi_value NapiClashSetTunFd(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
     int fd = 0;
     napi_get_value_int32(env, args[0], &fd);
     if (p_ClashSetTunFd) p_ClashSetTunFd(fd);
@@ -207,11 +204,21 @@ static napi_value NapiClashSetTunFd(napi_env env, napi_callback_info info) {
 static void LoadMihomoLibrary() {
     if (mihomoLib) return;
 
-    mihomoLib = dlopen("libmihomo.so", RTLD_LAZY);
+    // Try same directory as libclash.so first
+    std::string libDir = findLibDir();
+    if (!libDir.empty()) {
+        std::string fullPath = libDir + "/libmihomo.so";
+        mihomoLib = dlopen(fullPath.c_str(), RTLD_LAZY);
+    }
+
+    // Fallback: try default search path
+    if (!mihomoLib) {
+        mihomoLib = dlopen("libmihomo.so", RTLD_LAZY);
+    }
+
     if (!mihomoLib) return;
 
     p_ClashInit = (fn_clash_init)dlsym(mihomoLib, "ClashInit");
-    p_ClashStart = (fn_clash_start)dlsym(mihomoLib, "ClashStart");
     p_ClashStartFile = (fn_clash_start_file)dlsym(mihomoLib, "ClashStartFile");
     p_ClashStop = (fn_clash_stop)dlsym(mihomoLib, "ClashStop");
     p_ClashIsRunning = (fn_clash_is_running)dlsym(mihomoLib, "ClashIsRunning");
