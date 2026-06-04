@@ -389,7 +389,7 @@ export class HttpClashService implements IClashService {
       }
     } catch (e) {
       req.destroy();
-      throw e;
+      throw new Error(String(e));
     }
     return null;
   }
@@ -414,7 +414,7 @@ export class HttpClashService implements IClashService {
     const req = http.createHttp();
     try {
       await req.request(`${API_BASE}${path}`, {
-        method: http.RequestMethod.PATCH,
+        method: http.RequestMethod.PUT,
         header: { 'Content-Type': 'application/json' },
         extraData: body,
         connectTimeout: 3000,
