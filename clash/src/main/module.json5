@@ -27,10 +27,7 @@
       {
         "name": "ClashVpnAbility",
         "srcEntry": "./ets/vpnability/ClashVpnAbility.ets",
-        "type": "vpn",
-        "backgroundModes": [
-          "dataTransfer"
-        ]
+        "type": "vpn"
       }
     ],
     "abilities": [
