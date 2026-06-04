@@ -125,12 +125,27 @@ export class HttpClashService implements IClashService {
       // exists
     }
 
+    // Check if source config exists
+    let sourceExists = false;
+    try {
+      sourceExists = fileIo.accessSync(configPath);
+    } catch (_e) {
+      sourceExists = false;
+    }
+
+    if (!sourceExists) {
+      Logger.error('Config file not found: %{public}s', configPath);
+      this.state = ConnectState.DISCONNECTED;
+      throw new Error('Config file not found. Update subscription first.');
+    }
+
     try {
       fileIo.copyFileSync(configPath, `${configDir}/config.yaml`);
+      Logger.info('Config copied to %{public}s', configDir);
     } catch (e) {
       Logger.error('Failed to copy config: %{public}s', String(e));
       this.state = ConnectState.DISCONNECTED;
-      throw new Error('Failed to copy config');
+      throw new Error('Failed to copy config: ' + String(e));
     }
 
     // Start mihomo process

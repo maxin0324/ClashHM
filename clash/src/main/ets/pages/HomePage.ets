@@ -1,12 +1,12 @@
 import { ConnectButton } from '../components/ConnectButton';
 import { TrafficStats } from '../components/TrafficStats';
 import { getClashService, IClashService } from '../services/ClashService';
-import { NapiClashService } from '../services/NapiClashService';
 import { ConnectState, ConnectionMode } from '../models/ClashConfig';
 import { TrafficData, createEmptyTraffic } from '../models/TrafficData';
 import { TrafficMonitor } from '../services/TrafficMonitor';
 import { SubscriptionService } from '../services/SubscriptionService';
 import { vpnExtension } from '@kit.NetworkKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { common, Want } from '@kit.AbilityKit';
 
 import { Logger } from '../common/Logger';
@@ -59,6 +59,18 @@ export struct HomePage {
           return;
         }
         this.profileName = activeSub.name;
+
+        // Check if config file exists, update if not
+        let configExists = false;
+        try {
+          configExists = fileIo.accessSync(activeSub.filePath);
+        } catch (_e) {
+          configExists = false;
+        }
+        if (!configExists) {
+          Logger.info('Config file missing, updating subscription...');
+          await subService.updateSubscription(activeSub.id);
+        }
 
         // Start VPN Extension
         const want: Want = {
