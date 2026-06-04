@@ -2,7 +2,7 @@ import { HomePage } from './HomePage';
 import { ProxyPage } from './ProxyPage';
 import { SubscriptionPage } from './SubscriptionPage';
 import { SettingsPage } from './SettingsPage';
-import { NapiClashService } from '../services/NapiClashService';
+import { HttpClashService } from '../services/HttpClashService';
 import { MockClashService } from '../services/MockClashService';
 import { setClashService } from '../services/ClashService';
 import { common } from '@kit.AbilityKit';
@@ -21,10 +21,10 @@ struct Index {
   aboutToAppear(): void {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const service = new NapiClashService(context);
+      const service = new HttpClashService(context);
       setClashService(service);
       this.engineMode = 'mihomo';
-      Logger.info('Using NapiClashService (mihomo engine)');
+      Logger.info('Using HttpClashService (mihomo process + REST API)');
     } catch (e) {
       const errMsg = (e instanceof Error) ? e.message : String(e);
       Logger.error('NapiClashService failed: %{public}s', errMsg);
