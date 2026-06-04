@@ -188,8 +188,8 @@ export class SubscriptionService {
   }
 
   private countNodes(sub: Subscription, content: string): void {
-    const lines = content.split('\n');
     let count = 0;
+    const lines = content.split('\n');
     let inProxies = false;
     for (const line of lines) {
       const trimmed = line.trim();
@@ -198,10 +198,18 @@ export class SubscriptionService {
         continue;
       }
       if (inProxies) {
-        if (trimmed.startsWith('- {') || trimmed.startsWith('- name:')) {
+        if (trimmed.startsWith('- {') || trimmed.startsWith('- name:') || trimmed.startsWith('- {"name"')) {
           count++;
-        } else if (!trimmed.startsWith('-') && !trimmed.startsWith('#') && trimmed.length > 0 && !trimmed.startsWith(' ')) {
+        } else if (trimmed.length > 0 && !trimmed.startsWith('-') && !trimmed.startsWith('#') && !trimmed.startsWith(' ') && trimmed.indexOf(':') > 0) {
           inProxies = false;
+        }
+      }
+    }
+    // Fallback: count "server:" occurrences if no proxies section found
+    if (count === 0) {
+      for (const line of lines) {
+        if (line.trim().startsWith('server:') || line.indexOf('"server"') >= 0 || line.indexOf("'server'") >= 0) {
+          count++;
         }
       }
     }
