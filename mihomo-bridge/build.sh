@@ -12,11 +12,11 @@ export GOPROXY=https://goproxy.cn,direct
 echo "=== Fetching dependencies ==="
 go mod tidy
 
-echo "=== Building libmihomo.so (musl, static) ==="
+echo "=== Building libmihomo.so (musl, dynamic) ==="
 go build -buildmode=c-shared \
     -buildvcs=false \
     -trimpath \
-    -ldflags="-s -w -linkmode external -extldflags '-static'" \
+    -ldflags="-s -w" \
     -o libmihomo.so .
 
 echo "=== Build output ==="
