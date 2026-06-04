@@ -2,9 +2,7 @@
   "apiType": "stageMode",
   "buildOption": {
     "externalNativeOptions": {
-      "path": "./src/main/cpp/CMakeLists.txt",
-      "arguments": "",
-      "cppFlags": ""
+      "path": "./src/main/cpp/CMakeLists.txt"
     },
     "resOptions": {
       "copyCodeResource": {
@@ -32,7 +30,7 @@
       "name": "default"
     },
     {
-      "name": "ohosTest",
+      "name": "ohosTest"
     }
   ]
 }
