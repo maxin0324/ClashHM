@@ -114,7 +114,9 @@ export class SubscriptionService {
 
   private async fetchSubscriptionContent(sub: Subscription): Promise<void> {
     try {
+      Logger.info('fetch step 1: creating http request');
       const httpRequest = http.createHttp();
+      Logger.info('fetch step 2: sending request to %{public}s', sub.url);
       const response = await httpRequest.request(sub.url, {
         method: http.RequestMethod.GET,
         header: {
@@ -124,24 +126,20 @@ export class SubscriptionService {
         readTimeout: 30000,
       });
 
+      Logger.info('fetch step 3: response code %{public}d', String(response.responseCode));
       if (response.responseCode === http.ResponseCode.OK) {
         let content = response.result as string;
+        Logger.info('fetch step 4: content length %{public}d', String(content.length));
 
-        try {
-          const headers = response.header as Record<string, string>;
-          if (headers) {
-            this.parseSubscriptionInfo(sub, headers);
-          }
-        } catch (_e) {
-          // header parsing is optional
-        }
-
+        Logger.info('fetch step 5: writing to file %{public}s', sub.filePath);
         const file = fileIo.openSync(sub.filePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
         fileIo.writeSync(file.fd, content);
         fileIo.closeSync(file);
+        Logger.info('fetch step 6: file written');
 
         sub.lastUpdate = Date.now();
         this.countNodes(sub, content);
+        Logger.info('fetch step 7: done, nodes=%{public}d', String(sub.nodeCount));
       }
       httpRequest.destroy();
     } catch (e) {
