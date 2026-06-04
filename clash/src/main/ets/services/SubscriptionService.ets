@@ -5,7 +5,6 @@ import { Subscription, createDefaultSubscription } from '../models/Subscription'
 import { Constants } from '../common/Constants';
 import { Logger } from '../common/Logger';
 import { common } from '@kit.AbilityKit';
-import { util } from '@kit.ArkTS';
 
 export class SubscriptionService {
   private context: common.UIAbilityContext;
@@ -128,14 +127,13 @@ export class SubscriptionService {
       if (response.responseCode === http.ResponseCode.OK) {
         let content = response.result as string;
 
-        const subInfo = response.header as Record<string, string>;
-        this.parseSubscriptionInfo(sub, subInfo);
-
-        if (this.isBase64(content)) {
-          const decoder = new util.Base64Helper();
-          const textDecoder = util.TextDecoder.create('utf-8');
-          const decoded = decoder.decodeSync(content);
-          content = textDecoder.decodeToString(decoded);
+        try {
+          const headers = response.header as Record<string, string>;
+          if (headers) {
+            this.parseSubscriptionInfo(sub, headers);
+          }
+        } catch (_e) {
+          // header parsing is optional
         }
 
         const file = fileIo.openSync(sub.filePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
