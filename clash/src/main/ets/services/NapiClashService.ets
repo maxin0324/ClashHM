@@ -104,10 +104,28 @@ export class NapiClashService implements IClashService {
   constructor(context: common.UIAbilityContext) {
     this.context = context;
 
-    // Load mihomo engine from app's native lib directory
-    const bundleDir: string = context.bundleCodeDir;
-    const loadResult: string = callLoadEngine(bundleDir);
-    Logger.info('ClashNapi loadEngine: %{public}s', loadResult);
+    // Try multiple directories to find libmihomo.so
+    const searchDirs: string[] = [
+      context.bundleCodeDir,
+      context.bundleCodeDir + '/libs/arm64',
+      context.bundleCodeDir + '/libs/arm64-v8a',
+      '/data/storage/el1/bundle/libs/arm64',
+      context.filesDir,
+    ];
+
+    let loaded: boolean = false;
+    for (const dir of searchDirs) {
+      const result: string = callLoadEngine(dir);
+      Logger.info('ClashNapi loadEngine(%{public}s): %{public}s', dir, result);
+      if (result.startsWith('loaded')) {
+        loaded = true;
+        break;
+      }
+    }
+
+    if (!loaded) {
+      Logger.error('Failed to load mihomo engine from any path');
+    }
 
     const homeDir: string = context.filesDir;
     const initResult: string = callInit(homeDir);
