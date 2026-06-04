@@ -2,7 +2,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { vpnExtension } from '@kit.NetworkKit';
-import clashNapi from 'libclash.so';
+import { getClashService } from '../services/ClashService';
 
 const DOMAIN = 0x0001;
 const TAG = 'ClashHM';
@@ -21,9 +21,10 @@ export default class ClashAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'ClashAbility onDestroy');
 
     try {
-      clashNapi.stop();
+      const service = getClashService();
+      service.stop();
     } catch (_e) {
-      // engine may not be running
+      // service not initialized or engine not running
     }
 
     try {
