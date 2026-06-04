@@ -76,6 +76,10 @@ interface ClashConfigResponse {
   mode: string;
 }
 
+function callTestDlopen(path: string): string {
+  return clashNapi.testDlopen(path);
+}
+
 export class HttpClashService implements IClashService {
   private context: common.UIAbilityContext;
   private state: ConnectState = ConnectState.DISCONNECTED;
@@ -90,6 +94,20 @@ export class HttpClashService implements IClashService {
     this.context = context;
     this.mihomoPath = `${context.filesDir}/mihomo`;
     this.extractBinary();
+
+    // Test if libmihomo.so can be dlopen'd (TLS compatibility check)
+    const testPaths: string[] = [
+      '/data/storage/el1/bundle/libs/arm64/libmihomo.so',
+      context.bundleCodeDir + '/libs/arm64/libmihomo.so',
+      'libmihomo.so',
+    ];
+    for (const tp of testPaths) {
+      const result: string = callTestDlopen(tp);
+      Logger.info('testDlopen(%{public}s): %{public}s', tp, result);
+      if (result.startsWith('success')) {
+        break;
+      }
+    }
   }
 
   private extractBinary(): void {

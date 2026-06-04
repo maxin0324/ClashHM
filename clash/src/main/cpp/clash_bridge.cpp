@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <dlfcn.h>
 #include <string>
 
 static pid_t mihomoPid = -1;
@@ -89,11 +90,39 @@ static napi_value NapiIsProcessRunning(napi_env env, napi_callback_info info) {
     return result;
 }
 
+// testDlopen(libPath) - test if libmihomo.so can be loaded
+static napi_value NapiTestDlopen(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    char* libPath = getNapiString(env, args[0]);
+    std::string result;
+
+    void* handle = dlopen(libPath, RTLD_LAZY);
+    if (handle) {
+        void* initFn = dlsym(handle, "ClashInit");
+        if (initFn) {
+            result = "success:loaded_and_found_ClashInit";
+        } else {
+            result = "partial:loaded_but_no_ClashInit";
+        }
+        dlclose(handle);
+    } else {
+        const char* err = dlerror();
+        result = std::string("failed:") + (err ? err : "unknown");
+    }
+
+    free(libPath);
+    return returnString(env, result.c_str());
+}
+
 static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
         {"startProcess", nullptr, NapiStartProcess, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stopProcess", nullptr, NapiStopProcess, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"isProcessRunning", nullptr, NapiIsProcessRunning, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"testDlopen", nullptr, NapiTestDlopen, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
