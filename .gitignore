@@ -1,0 +1,20 @@
+/oh_modules
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+/.bitfun
+local.properties
+
+# Compiled libraries (build with mihomo-bridge/build.sh)
+mihomo-bridge/libmihomo.so
+mihomo-bridge/libmihomo.h
+clash/src/main/cpp/libs/
+clash/src/main/cpp/libmihomo.h
+
+# Go cache
+mihomo-bridge/go.sum

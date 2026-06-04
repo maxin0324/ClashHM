@@ -1,0 +1,59 @@
+{
+  "module": {
+    "name": "clash",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "ClashAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "ClashVpnAbility",
+        "srcEntry": "./ets/vpnability/ClashVpnAbility.ets",
+        "type": "vpn",
+        "backgroundModes": [
+          "dataTransfer"
+        ]
+      }
+    ],
+    "abilities": [
+      {
+        "name": "ClashAbility",
+        "srcEntry": "./ets/clashability/ClashAbility.ets",
+        "description": "$string:ClashAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:ClashAbility_label",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "ohos.want.action.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

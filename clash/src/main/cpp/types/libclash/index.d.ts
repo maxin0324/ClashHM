@@ -1,0 +1,14 @@
+export const init: (homeDir: string) => string;
+export const startFile: (configPath: string) => string;
+export const stop: () => void;
+export const isRunning: () => number;
+export const getProxies: () => string;
+export const selectProxy: (groupName: string, proxyName: string) => number;
+export const testDelay: (proxyName: string, url: string, timeout: number) => number;
+export const getTraffic: () => string;
+export const getConnections: () => string;
+export const closeAllConnections: () => void;
+export const closeConnection: (id: string) => void;
+export const getMode: () => string;
+export const setMode: (mode: string) => void;
+export const setTunFd: (fd: number) => void;
