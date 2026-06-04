@@ -1,4 +1,5 @@
 export const init: (homeDir: string) => string;
+export const loadEngine: (libDir: string) => string;
 export const startFile: (configPath: string) => string;
 export const stop: () => void;
 export const isRunning: () => number;

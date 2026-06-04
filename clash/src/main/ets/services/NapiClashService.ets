@@ -54,6 +54,10 @@ function callInit(dir: string): string {
   return clashNapi.init(dir);
 }
 
+function callLoadEngine(libDir: string): string {
+  return clashNapi.loadEngine(libDir);
+}
+
 function callStartFile(path: string): string {
   return clashNapi.startFile(path);
 }
@@ -99,7 +103,14 @@ export class NapiClashService implements IClashService {
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
-    const initResult: string = callInit(context.filesDir);
+
+    // Load mihomo engine from app's native lib directory
+    const bundleDir: string = context.bundleCodeDir;
+    const loadResult: string = callLoadEngine(bundleDir);
+    Logger.info('ClashNapi loadEngine: %{public}s', loadResult);
+
+    const homeDir: string = context.filesDir;
+    const initResult: string = callInit(homeDir);
     Logger.info('ClashNapi init: %{public}s', initResult);
   }
 
