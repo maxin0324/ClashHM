@@ -50,6 +50,42 @@ interface NapiResult {
   error: string;
 }
 
+function callInit(dir: string): string {
+  return clashNapi.init(dir);
+}
+
+function callStartFile(path: string): string {
+  return clashNapi.startFile(path);
+}
+
+function callGetProxies(): string {
+  return clashNapi.getProxies();
+}
+
+function callGetTraffic(): string {
+  return clashNapi.getTraffic();
+}
+
+function callGetConnections(): string {
+  return clashNapi.getConnections();
+}
+
+function callGetMode(): string {
+  return clashNapi.getMode();
+}
+
+function callIsRunning(): number {
+  return clashNapi.isRunning();
+}
+
+function callSelectProxy(group: string, proxy: string): number {
+  return clashNapi.selectProxy(group, proxy);
+}
+
+function callTestDelay(name: string, url: string, timeout: number): number {
+  return clashNapi.testDelay(name, url, timeout);
+}
+
 export class NapiClashService implements IClashService {
   private context: common.UIAbilityContext;
   private state: ConnectState = ConnectState.DISCONNECTED;
@@ -63,16 +99,15 @@ export class NapiClashService implements IClashService {
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
-    const homeDir = context.filesDir;
-    const result = clashNapi.init(homeDir);
-    Logger.info('ClashNapi init: %{public}s', result);
+    const initResult: string = callInit(context.filesDir);
+    Logger.info('ClashNapi init: %{public}s', initResult);
   }
 
   async start(configPath: string): Promise<void> {
     this.state = ConnectState.CONNECTING;
     try {
-      const result = clashNapi.startFile(configPath);
-      const parsed: NapiResult = JSON.parse(result) as NapiResult;
+      const resultStr: string = callStartFile(configPath);
+      const parsed: NapiResult = JSON.parse(resultStr) as NapiResult;
       if (parsed.error) {
         this.state = ConnectState.DISCONNECTED;
         throw new Error(parsed.error);
@@ -102,8 +137,8 @@ export class NapiClashService implements IClashService {
 
   async reload(configPath: string): Promise<void> {
     clashNapi.stop();
-    const result = clashNapi.startFile(configPath);
-    const parsed: NapiResult = JSON.parse(result) as NapiResult;
+    const resultStr: string = callStartFile(configPath);
+    const parsed: NapiResult = JSON.parse(resultStr) as NapiResult;
     if (parsed.error) {
       throw new Error(parsed.error);
     }
@@ -111,8 +146,8 @@ export class NapiClashService implements IClashService {
 
   getProxyGroups(): ProxyGroup[] {
     try {
-      const json = clashNapi.getProxies();
-      const groups: NapiGroupInfo[] = JSON.parse(json) as NapiGroupInfo[];
+      const jsonStr: string = callGetProxies();
+      const groups: NapiGroupInfo[] = JSON.parse(jsonStr) as NapiGroupInfo[];
       this.cachedGroups = groups.map((g: NapiGroupInfo): ProxyGroup => {
         return {
           name: g.name,
@@ -140,14 +175,14 @@ export class NapiClashService implements IClashService {
   }
 
   async selectProxy(groupName: string, proxyName: string): Promise<void> {
-    const result = clashNapi.selectProxy(groupName, proxyName);
-    if (result !== 0) {
-      Logger.error('Failed to select proxy: %{public}s', String(result));
+    const ret: number = callSelectProxy(groupName, proxyName);
+    if (ret !== 0) {
+      Logger.error('Failed to select proxy: %{public}s', String(ret));
     }
   }
 
   async testLatency(proxyName: string): Promise<number> {
-    const delay = clashNapi.testDelay(proxyName, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT);
+    const delay: number = callTestDelay(proxyName, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT);
     return delay;
   }
 
@@ -157,7 +192,7 @@ export class NapiClashService implements IClashService {
     for (const group of groups) {
       if (group.name === groupName) {
         for (const node of group.nodes) {
-          const delay = clashNapi.testDelay(node.name, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT);
+          const delay: number = callTestDelay(node.name, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT);
           result.set(node.name, delay);
         }
         break;
@@ -168,11 +203,11 @@ export class NapiClashService implements IClashService {
 
   getTraffic(): TrafficData {
     try {
-      const json = clashNapi.getTraffic();
-      const t: NapiTraffic = JSON.parse(json) as NapiTraffic;
+      const jsonStr: string = callGetTraffic();
+      const t: NapiTraffic = JSON.parse(jsonStr) as NapiTraffic;
 
-      let uploadSpeed = 0;
-      let downloadSpeed = 0;
+      let uploadSpeed: number = 0;
+      let downloadSpeed: number = 0;
       if (this.prevUpload > 0) {
         uploadSpeed = t.uploadTotal - this.prevUpload;
         downloadSpeed = t.downloadTotal - this.prevDownload;
@@ -193,8 +228,8 @@ export class NapiClashService implements IClashService {
       };
 
       try {
-        const connJson = clashNapi.getConnections();
-        const conns: NapiConnection[] = JSON.parse(connJson) as NapiConnection[];
+        const connStr: string = callGetConnections();
+        const conns: NapiConnection[] = JSON.parse(connStr) as NapiConnection[];
         this.lastTraffic.activeConnections = conns.length;
       } catch (_e) {
         // ignore
@@ -208,8 +243,8 @@ export class NapiClashService implements IClashService {
 
   getConnections(): LogEntry[] {
     try {
-      const json = clashNapi.getConnections();
-      const conns: NapiConnection[] = JSON.parse(json) as NapiConnection[];
+      const jsonStr: string = callGetConnections();
+      const conns: NapiConnection[] = JSON.parse(jsonStr) as NapiConnection[];
       return conns.map((c: NapiConnection): LogEntry => {
         return {
           id: c.id,
@@ -243,7 +278,7 @@ export class NapiClashService implements IClashService {
 
   getState(): ConnectState {
     if (this.state === ConnectState.CONNECTED) {
-      const running = clashNapi.isRunning();
+      const running: number = callIsRunning();
       if (running === 0) {
         this.state = ConnectState.DISCONNECTED;
       }
@@ -267,7 +302,7 @@ export class NapiClashService implements IClashService {
 
   private refreshMode(): void {
     try {
-      const modeStr = clashNapi.getMode();
+      const modeStr: string = callGetMode();
       if (modeStr === 'global') {
         this.mode = ConnectionMode.GLOBAL;
       } else if (modeStr === 'direct') {
