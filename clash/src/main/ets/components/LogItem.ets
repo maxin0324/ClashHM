@@ -28,7 +28,6 @@ export struct LogItem {
 
   build() {
     Row() {
-      // Type badge
       Text(this.entry.network)
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
@@ -39,10 +38,10 @@ export struct LogItem {
         .width(40)
         .textAlign(TextAlign.Center)
 
-      // Content
       Column({ space: 2 }) {
         Text(this.entry.host || `${this.entry.destinationIP}:${this.entry.destinationPort}`)
-          .fontSize(13)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -68,7 +67,6 @@ export struct LogItem {
       .margin({ left: 10 })
       .layoutWeight(1)
 
-      // Time + traffic
       Column({ space: 2 }) {
         Text(this.formatTime(this.entry.timestamp))
           .fontSize(10)
@@ -81,7 +79,11 @@ export struct LogItem {
       .alignItems(HorizontalAlign.End)
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16, bottom: 8 })
+    .backgroundColor($r('app.color.card_bg'))
+    .borderRadius(8)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 }
 

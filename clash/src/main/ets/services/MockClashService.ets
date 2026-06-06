@@ -128,6 +128,10 @@ export class MockClashService implements IClashService {
     Logger.info('MockClashService: started');
   }
 
+  async startCore(_configPath: string): Promise<void> {
+    Logger.info('MockClashService: core ready');
+  }
+
   async stop(): Promise<void> {
     Logger.info('MockClashService: stopping...');
     this.stopTrafficSimulation();
@@ -143,6 +147,10 @@ export class MockClashService implements IClashService {
 
   getProxyGroups(): ProxyGroup[] {
     return this.mockGroups;
+  }
+
+  async getProxyGroupsAsync(): Promise<ProxyGroup[]> {
+    return this.getProxyGroups();
   }
 
   async selectProxy(groupName: string, proxyName: string): Promise<void> {
@@ -188,6 +196,10 @@ export class MockClashService implements IClashService {
     return this.mockTraffic;
   }
 
+  async getTrafficAsync(): Promise<TrafficData> {
+    return this.getTraffic();
+  }
+
   getConnections(): LogEntry[] {
     return this.mockLogs;
   }
@@ -198,6 +210,20 @@ export class MockClashService implements IClashService {
 
   async closeAllConnections(): Promise<void> {
     this.mockLogs = [];
+  }
+
+  isCoreRunning(): boolean {
+    return true;
+  }
+
+  setVpnConnected(connected: boolean): void {
+    this.state = connected ? ConnectState.CONNECTED : ConnectState.DISCONNECTED;
+    if (connected) {
+      this.startTrafficSimulation();
+    } else {
+      this.stopTrafficSimulation();
+      this.mockTraffic = createEmptyTraffic();
+    }
   }
 
   getState(): ConnectState {

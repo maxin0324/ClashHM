@@ -27,13 +27,19 @@ export struct SettingsPage {
   build() {
     Column() {
       Row() {
-        Text($r('app.string.tab_settings'))
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
+        Column({ space: 4 }) {
+          Text($r('app.string.tab_settings'))
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Text('Core, network, and app preferences')
+            .fontSize(13)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 12, bottom: 8 })
+      .padding({ left: 20, right: 20, top: 18, bottom: 12 })
 
       List({ space: 0 }) {
         ListItem() {
@@ -118,15 +124,9 @@ export struct SettingsPage {
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: 16, right: 16, bottom: 16 })
+      .padding({ left: 16, right: 16, bottom: 14 })
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
-      .divider({
-        strokeWidth: 0.5,
-        color: $r('app.color.divider'),
-        startMargin: 16,
-        endMargin: 16,
-      })
     }
     .width('100%')
     .height('100%')
@@ -136,11 +136,11 @@ export struct SettingsPage {
   @Builder
   sectionHeader(title: Resource) {
     Text(title)
-      .fontSize(14)
-      .fontWeight(FontWeight.Medium)
+      .fontSize(12)
+      .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.primary'))
       .width('100%')
-      .padding({ left: 4, top: 20, bottom: 8 })
+      .padding({ left: 2, top: 18, bottom: 8 })
   }
 
   @Builder
@@ -158,10 +158,11 @@ export struct SettingsPage {
         })
     }
     .width('100%')
-    .height(52)
+    .height(54)
     .padding({ left: 16, right: 16 })
     .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(12)
+    .borderRadius(8)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 
   @Builder
@@ -183,10 +184,11 @@ export struct SettingsPage {
         })
     }
     .width('100%')
-    .height(52)
+    .height(54)
     .padding({ left: 16, right: 8 })
     .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(12)
+    .borderRadius(8)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 
   @Builder
@@ -202,9 +204,10 @@ export struct SettingsPage {
         .fontColor($r('app.color.text_secondary'))
     }
     .width('100%')
-    .height(52)
+    .height(54)
     .padding({ left: 16, right: 16 })
     .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(12)
+    .borderRadius(8)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 }

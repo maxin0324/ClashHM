@@ -8,7 +8,7 @@ const DOMAIN = 0x0001;
 const TAG = 'ClashHM';
 
 export default class ClashAbility extends UIAbility {
-  onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     } catch (err) {
@@ -22,7 +22,9 @@ export default class ClashAbility extends UIAbility {
 
     try {
       const service = getClashService();
-      service.stop();
+      service.stop().catch((_e: Error) => {
+        // service may already be stopped
+      });
     } catch (_e) {
       // service not initialized or engine not running
     }
@@ -32,7 +34,9 @@ export default class ClashAbility extends UIAbility {
         bundleName: this.context.abilityInfo.bundleName,
         abilityName: 'ClashVpnAbility',
       };
-      vpnExtension.stopVpnExtensionAbility(want);
+      vpnExtension.stopVpnExtensionAbility(want).catch((_e: Error) => {
+        // vpn may not be running
+      });
     } catch (_e) {
       // vpn may not be running
     }

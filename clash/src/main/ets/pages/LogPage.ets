@@ -69,22 +69,31 @@ struct LogPage {
     Column() {
       // Header
       Row() {
-        Text('←')
-          .fontSize(22)
+        Button('Back')
+          .height(34)
+          .fontSize(13)
           .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.card_bg'))
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .padding({ left: 12, right: 12 })
           .onClick(() => {
             this.getUIContext().getRouter().back();
           })
 
-        Text($r('app.string.logs'))
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .margin({ left: 12 })
+        Column({ space: 4 }) {
+          Text($r('app.string.logs'))
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Text(`${this.logs.length} connections`)
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 })
 
-        Blank()
-
-        // Live toggle
         Row({ space: 4 }) {
           Circle()
             .width(8)
@@ -97,29 +106,28 @@ struct LogPage {
         .onClick(() => {
           this.isLive = !this.isLive;
         })
-        .margin({ right: 16 })
+        .margin({ right: 10 })
 
-        Button($r('app.string.close_all'))
+        Button('Clear')
           .type(ButtonType.Normal)
-          .height(28)
+          .height(34)
           .fontSize(12)
           .fontColor($r('app.color.error_color'))
-          .backgroundColor(Color.Transparent)
-          .borderWidth(1)
-          .borderColor($r('app.color.error_color'))
-          .borderRadius(14)
-          .padding({ left: 10, right: 10 })
+          .backgroundColor($r('app.color.card_bg'))
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .padding({ left: 12, right: 12 })
           .onClick(() => {
             this.clearConnections();
           })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 18, bottom: 12 })
 
-      // Search bar
       Row() {
-        Text('🔍')
-          .fontSize(14)
+        Text('Search')
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
 
         TextInput({ placeholder: 'Filter by host, rule, proxy...', text: this.filterText })
           .layoutWeight(1)
@@ -134,21 +142,12 @@ struct LogPage {
       }
       .width('100%')
       .padding({ left: 12, right: 12 })
-      .margin({ left: 16, right: 16, bottom: 8 })
-      .height(40)
+      .margin({ left: 16, right: 16, bottom: 10 })
+      .height(42)
       .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(10)
+      .borderRadius(8)
+      .border({ width: 1, color: $r('app.color.divider') })
 
-      // Connection count
-      Row() {
-        Text(`${this.logs.length} connections`)
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-      }
-      .width('100%')
-      .padding({ left: 20, right: 20, bottom: 4 })
-
-      // Log list
       List({ scroller: this.listScroller }) {
         ForEach(this.logs, (log: LogItemModel) => {
           ListItem() {
@@ -160,12 +159,6 @@ struct LogPage {
       .layoutWeight(1)
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
-      .divider({
-        strokeWidth: 0.5,
-        color: $r('app.color.divider'),
-        startMargin: 12,
-        endMargin: 12,
-      })
     }
     .width('100%')
     .height('100%')

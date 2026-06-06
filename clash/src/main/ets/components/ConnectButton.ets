@@ -37,53 +37,58 @@ export struct ConnectButton {
     return $r('app.string.disconnected');
   }
 
-  private getIconText(): string {
-    if (this.state === ConnectState.CONNECTED) {
-      return '⚡';
+  @Builder
+  private powerIcon() {
+    Image($r('app.media.power_icon'))
+      .width(76)
+      .height(76)
+      .objectFit(ImageFit.Contain)
+  }
+
+  @Builder
+  private loadingIcon() {
+    Row({ space: 7 }) {
+      Circle()
+        .width(9)
+        .height(9)
+        .fill(Color.White)
+        .opacity(0.55)
+      Circle()
+        .width(9)
+        .height(9)
+        .fill(Color.White)
+        .opacity(0.85)
+      Circle()
+        .width(9)
+        .height(9)
+        .fill(Color.White)
+        .opacity(0.55)
     }
-    return '▶';
+    .width(76)
+    .height(76)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
   }
 
   build() {
-    Column({ space: 16 }) {
+    Column({ space: 10 }) {
       Stack() {
-        // Ripple effect
-        Circle()
-          .width(160)
-          .height(160)
-          .fill(Color.Transparent)
-          .stroke(this.getCircleColor())
-          .strokeWidth(1.5)
-          .opacity(this.rippleOpacity)
+        Row()
+          .width(128)
+          .height(128)
+          .borderRadius(64)
+          .backgroundColor(this.getCircleColor())
+          .opacity(this.state === ConnectState.CONNECTING ? 0.84 : 1)
+          .shadow({ radius: 16, color: '#22000000', offsetX: 0, offsetY: 8 })
 
-        // Outer ring
-        Circle()
-          .width(140)
-          .height(140)
-          .fill(Color.Transparent)
-          .stroke(this.getCircleColor())
-          .strokeWidth(2)
-          .opacity(0.3)
-
-        // Main circle
-        Circle()
-          .width(120)
-          .height(120)
-          .fill(this.getCircleColor())
-          .shadow({
-            radius: 20,
-            color: this.getCircleColor(),
-            offsetX: 0,
-            offsetY: 4,
-          })
-
-        // Icon text
-        Text(this.getIconText())
-          .fontSize(40)
-          .fontColor(Color.White)
+        if (this.state === ConnectState.CONNECTING) {
+          this.loadingIcon()
+        } else {
+          this.powerIcon()
+        }
       }
-      .width(160)
-      .height(160)
+      .width(132)
+      .height(132)
       .scale({ x: this.btnScale, y: this.btnScale })
       .onClick(() => {
         if (this.state === ConnectState.CONNECTING) {
@@ -94,14 +99,16 @@ export struct ConnectButton {
       })
 
       Text(this.getStateText())
-        .fontSize(20)
+        .fontSize(18)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
 
       Text(this.getStatusText())
-        .fontSize(14)
+        .fontSize(13)
         .fontColor($r('app.color.text_secondary'))
     }
+    .width('100%')
+    .alignItems(HorizontalAlign.Center)
   }
 
   private playTapAnimation(): void {

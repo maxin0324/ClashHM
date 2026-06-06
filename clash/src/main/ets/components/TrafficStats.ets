@@ -10,60 +10,45 @@ export struct TrafficStats {
   @Prop activeConnections: number = 0;
 
   build() {
-    Column({ space: 12 }) {
-      // Speed display
+    Column({ space: 10 }) {
       Row() {
-        // Upload
-        Column({ space: 4 }) {
-          Row({ space: 6 }) {
-            Image($r('sys.media.ohos_ic_public_arrow_up'))
-              .width(14)
-              .height(14)
-              .fillColor($r('app.color.upload_color'))
-            Text($r('app.string.upload'))
-              .fontSize(12)
-              .fontColor($r('app.color.text_secondary'))
-          }
+        Column({ space: 6 }) {
+          Text($r('app.string.upload'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
 
           Text(formatSpeed(this.uploadSpeed))
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.upload_color'))
         }
         .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+        .alignItems(HorizontalAlign.Start)
 
         Divider()
           .vertical(true)
-          .height(36)
+          .height(42)
           .color($r('app.color.divider'))
 
-        // Download
-        Column({ space: 4 }) {
-          Row({ space: 6 }) {
-            Image($r('sys.media.ohos_ic_public_arrow_down'))
-              .width(14)
-              .height(14)
-              .fillColor($r('app.color.download_color'))
-            Text($r('app.string.download'))
-              .fontSize(12)
-              .fontColor($r('app.color.text_secondary'))
-          }
+        Column({ space: 6 }) {
+          Text($r('app.string.download'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
 
           Text(formatSpeed(this.downloadSpeed))
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.download_color'))
         }
         .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+        .alignItems(HorizontalAlign.End)
       }
       .width('100%')
-      .padding({ top: 12, bottom: 12 })
+      .padding({ left: 16, right: 16, top: 16, bottom: 16 })
       .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(12)
+      .borderRadius(8)
+      .border({ width: 1, color: $r('app.color.divider') })
 
-      // Session stats
       Row() {
         Column({ space: 2 }) {
           Text($r('app.string.data_usage'))
@@ -87,7 +72,7 @@ export struct TrafficStats {
         .alignItems(HorizontalAlign.End)
       }
       .width('100%')
-      .padding({ left: 16, right: 16 })
+      .padding({ left: 2, right: 2 })
     }
     .width('100%')
   }

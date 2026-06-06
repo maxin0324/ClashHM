@@ -127,14 +127,18 @@ export struct SubscriptionPage {
   build() {
     Stack() {
       Column() {
-        // Header
         Row() {
-          Text($r('app.string.tab_subscription'))
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-
-          Blank()
+          Column({ space: 4 }) {
+            Text($r('app.string.tab_subscription'))
+              .fontSize(24)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+            Text(`${this.subscriptions.length} profiles`)
+              .fontSize(13)
+              .fontColor($r('app.color.text_secondary'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
 
           if (this.isLoading) {
             LoadingProgress()
@@ -144,45 +148,51 @@ export struct SubscriptionPage {
           }
 
           Button() {
-            Text('+')
-              .fontSize(22)
+            Text('Add')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
               .fontColor(Color.White)
           }
-          .type(ButtonType.Circle)
-          .width(36)
-          .height(36)
+          .height(34)
           .backgroundColor($r('app.color.primary'))
-          .margin({ left: 8 })
+          .borderRadius(8)
+          .padding({ left: 14, right: 14 })
+          .margin({ left: 10 })
           .onClick(() => {
             this.showAddSubscriptionDialog();
           })
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 12, bottom: 8 })
+        .padding({ left: 20, right: 20, top: 18, bottom: 12 })
 
         if (this.subscriptions.length === 0) {
-          Column({ space: 16 }) {
-            Text('📂')
-              .fontSize(48)
-              .opacity(0.5)
-
+          Column({ space: 12 }) {
             Text($r('app.string.no_subscription'))
-              .fontSize(16)
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+            Text('Add a profile to start syncing nodes.')
+              .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
 
             Button($r('app.string.add_subscription'))
               .type(ButtonType.Normal)
-              .height(40)
+              .height(38)
               .fontSize(14)
               .fontColor(Color.White)
               .backgroundColor($r('app.color.primary'))
-              .borderRadius(20)
-              .padding({ left: 24, right: 24 })
+              .borderRadius(8)
+              .padding({ left: 18, right: 18 })
               .onClick(() => {
                 this.showAddSubscriptionDialog();
               })
           }
-          .width('100%')
+          .width('90%')
+          .padding(24)
+          .backgroundColor($r('app.color.card_bg'))
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
         } else {
@@ -212,7 +222,7 @@ export struct SubscriptionPage {
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 16, right: 16, bottom: 16 })
+          .padding({ left: 16, right: 16, bottom: 14 })
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
         }
@@ -220,13 +230,14 @@ export struct SubscriptionPage {
       .width('100%')
       .height('100%')
       .backgroundColor($r('app.color.page_bg'))
+      .alignItems(HorizontalAlign.Center)
 
       // Add/Edit dialog
       if (this.showAddDialog) {
         Column() {
-          Column({ space: 20 }) {
+          Column({ space: 18 }) {
             Text(this.editingId ? $r('app.string.edit_subscription') : $r('app.string.add_subscription'))
-              .fontSize(20)
+              .fontSize(18)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
 
@@ -274,7 +285,7 @@ export struct SubscriptionPage {
                 .fontSize(16)
                 .fontColor($r('app.color.text_primary'))
                 .backgroundColor($r('app.color.page_bg'))
-                .borderRadius(22)
+                .borderRadius(8)
                 .onClick(() => {
                   this.showAddDialog = false;
                 })
@@ -286,7 +297,7 @@ export struct SubscriptionPage {
                 .fontSize(16)
                 .fontColor(Color.White)
                 .backgroundColor($r('app.color.primary'))
-                .borderRadius(22)
+                .borderRadius(8)
                 .enabled(!this.isLoading)
                 .onClick(() => {
                   this.confirmAdd();
@@ -297,8 +308,9 @@ export struct SubscriptionPage {
           .width('90%')
           .padding(24)
           .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(16)
-          .shadow({ radius: 20, color: '#33000000', offsetX: 0, offsetY: 4 })
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .shadow({ radius: 20, color: '#22000000', offsetX: 0, offsetY: 6 })
         }
         .width('100%')
         .height('100%')

@@ -32,6 +32,7 @@ export class SubscriptionService {
     try {
       const data = await this.store.get(Constants.SUBSCRIPTIONS_KEY, '[]') as string;
       this.subscriptions = JSON.parse(data) as Subscription[];
+      await this.recountLocalSubscriptions();
     } catch (e) {
       Logger.error('Failed to parse subscriptions: %{public}s', String(e));
       this.subscriptions = [];
@@ -144,6 +145,7 @@ export class SubscriptionService {
           Logger.error('fetch: empty response body');
           return;
         }
+        content = this.normalizeSubscriptionContent(content);
         Logger.info('fetch step 4: content length %{public}s', String(content.length));
 
         Logger.info('fetch step 5: writing to file %{public}s', sub.filePath);
@@ -191,29 +193,99 @@ export class SubscriptionService {
     let count = 0;
     const lines = content.split('\n');
     let inProxies = false;
+    let inProxyProviders = false;
     for (const line of lines) {
+      const isTopLevel = line.length > 0 && line[0] !== ' ' && line[0] !== '\t' && !line.startsWith('-');
       const trimmed = line.trim();
-      if (trimmed === 'proxies:') {
+      if (isTopLevel && trimmed === 'proxies:') {
         inProxies = true;
+        inProxyProviders = false;
+        continue;
+      }
+      if (isTopLevel && trimmed === 'proxy-providers:') {
+        inProxyProviders = true;
+        inProxies = false;
         continue;
       }
       if (inProxies) {
-        if (trimmed.startsWith('- {') || trimmed.startsWith('- name:') || trimmed.startsWith('- {"name"')) {
-          count++;
-        } else if (trimmed.length > 0 && !trimmed.startsWith('-') && !trimmed.startsWith('#') && !trimmed.startsWith(' ') && trimmed.indexOf(':') > 0) {
+        if (isTopLevel && trimmed.indexOf(':') > 0 && trimmed !== 'proxies:') {
           inProxies = false;
+        } else if (trimmed.startsWith('- {') && (trimmed.indexOf('server:') >= 0 || trimmed.indexOf('"server"') >= 0 || trimmed.indexOf("'server'") >= 0)) {
+          count++;
+        } else if (trimmed.startsWith('- {"name"') || trimmed.startsWith("- {'name'")) {
+          count++;
+        } else if (trimmed.startsWith('server:')) {
+          count++;
+        }
+      } else if (inProxyProviders) {
+        if (trimmed.startsWith('path:') || trimmed.startsWith('url:')) {
+          count++;
+        } else if (isTopLevel && trimmed.indexOf(':') > 0 && trimmed !== 'proxy-providers:') {
+          inProxyProviders = false;
         }
       }
     }
-    // Fallback: count "server:" occurrences if no proxies section found
+
     if (count === 0) {
       for (const line of lines) {
-        if (line.trim().startsWith('server:') || line.indexOf('"server"') >= 0 || line.indexOf("'server'") >= 0) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('server:') || trimmed.indexOf('"server"') >= 0 || trimmed.indexOf("'server'") >= 0) {
           count++;
         }
       }
     }
     sub.nodeCount = count;
+  }
+
+  private async recountLocalSubscriptions(): Promise<void> {
+    let changed = false;
+    for (const sub of this.subscriptions) {
+      if (!sub.filePath) {
+        continue;
+      }
+      try {
+        const content = this.readTextFile(sub.filePath);
+        const oldCount = sub.nodeCount;
+        this.countNodes(sub, content);
+        if (sub.nodeCount !== oldCount) {
+          changed = true;
+        }
+      } catch (_e) {
+        // Keep stored metadata if the profile file is unavailable.
+      }
+    }
+    if (changed) {
+      await this.saveSubscriptions();
+    }
+  }
+
+  private readTextFile(filePath: string): string {
+    try {
+      const file = fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY);
+      let content = '';
+      try {
+        const stat = fileIo.statSync(filePath);
+        const buffer = new ArrayBuffer(stat.size);
+        fileIo.readSync(file.fd, buffer);
+        const view = new Uint8Array(buffer);
+        const bytes: number[] = [];
+        for (let i = 0; i < view.length; i++) {
+          bytes.push(view[i]);
+        }
+        content = this.decodeUtf8(bytes);
+      } catch (e) {
+        Logger.error('Failed to read subscription file: %{public}s', String(e));
+      }
+      try {
+        fileIo.closeSync(file);
+      } catch (_e) {
+        // ignore close failure
+      }
+      return content;
+    } catch (e) {
+      Logger.error('Failed to open subscription file: %{public}s', String(e));
+      return '';
+    }
   }
 
   private isBase64(str: string): boolean {
@@ -223,6 +295,79 @@ export class SubscriptionService {
     }
     const base64Regex = /^[A-Za-z0-9+/\n\r]+=*$/;
     return base64Regex.test(trimmed.replace(/\s/g, ''));
+  }
+
+  private normalizeSubscriptionContent(content: string): string {
+    let normalized = content.trim();
+    if (this.isBase64(normalized)) {
+      const decoded = this.decodeBase64ToString(normalized);
+      if (decoded.length > 0) {
+        normalized = decoded.trim();
+      }
+    }
+
+    if (!normalized.includes('proxies:') && !normalized.includes('proxy-providers:')) {
+      const firstLine = normalized.split('\n')[0]?.trim() || '';
+      if (firstLine.startsWith('ss://') || firstLine.startsWith('ssr://') ||
+        firstLine.startsWith('vmess://') || firstLine.startsWith('vless://') ||
+        firstLine.startsWith('trojan://') || firstLine.startsWith('hysteria2://') ||
+        firstLine.startsWith('hy2://')) {
+        throw new Error('This subscription returns share-link nodes instead of Clash YAML. Link conversion is not implemented yet.');
+      }
+    }
+
+    return normalized + '\n';
+  }
+
+  private decodeBase64ToString(input: string): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const clean = input.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    const bytes: number[] = [];
+    let buffer = 0;
+    let bits = 0;
+    for (let i = 0; i < clean.length; i++) {
+      const ch = clean.charAt(i);
+      if (ch === '=') {
+        break;
+      }
+      const value = chars.indexOf(ch);
+      if (value < 0) {
+        continue;
+      }
+      buffer = (buffer << 6) | value;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((buffer >> bits) & 0xff);
+      }
+    }
+    return this.decodeUtf8(bytes);
+  }
+
+  private decodeUtf8(bytes: number[]): string {
+    let result = '';
+    for (let i = 0; i < bytes.length; i++) {
+      const b0 = bytes[i];
+      if (b0 < 0x80) {
+        result += String.fromCharCode(b0);
+      } else if ((b0 & 0xe0) === 0xc0 && i + 1 < bytes.length) {
+        const b1 = bytes[++i];
+        result += String.fromCharCode(((b0 & 0x1f) << 6) | (b1 & 0x3f));
+      } else if ((b0 & 0xf0) === 0xe0 && i + 2 < bytes.length) {
+        const b1 = bytes[++i];
+        const b2 = bytes[++i];
+        result += String.fromCharCode(((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f));
+      } else if ((b0 & 0xf8) === 0xf0 && i + 3 < bytes.length) {
+        const b1 = bytes[++i];
+        const b2 = bytes[++i];
+        const b3 = bytes[++i];
+        let codePoint = ((b0 & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f);
+        codePoint -= 0x10000;
+        result += String.fromCharCode(0xd800 + (codePoint >> 10));
+        result += String.fromCharCode(0xdc00 + (codePoint & 0x3ff));
+      }
+    }
+    return result;
   }
 
   private generateId(): string {

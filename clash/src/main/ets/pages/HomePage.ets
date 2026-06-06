@@ -1,13 +1,17 @@
 import { ConnectButton } from '../components/ConnectButton';
 import { TrafficStats } from '../components/TrafficStats';
 import { getClashService, IClashService } from '../services/ClashService';
-import { ConnectState, ConnectionMode } from '../models/ClashConfig';
+import { ConnectState, ConnectionMode, ProxyGroup } from '../models/ClashConfig';
 import { TrafficData, createEmptyTraffic } from '../models/TrafficData';
 import { TrafficMonitor } from '../services/TrafficMonitor';
 import { SubscriptionService } from '../services/SubscriptionService';
+import { ConfigManager } from '../services/ConfigManager';
+import { ProxySelectionService } from '../services/ProxySelectionService';
+import { Constants } from '../common/Constants';
 import { vpnExtension } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { common, Want } from '@kit.AbilityKit';
+import { pasteboard, commonEventManager } from '@kit.BasicServicesKit';
 
 import { Logger } from '../common/Logger';
 
@@ -17,9 +21,14 @@ export struct HomePage {
   @State traffic: TrafficData = createEmptyTraffic();
   @State currentMode: string = ConnectionMode.RULE;
   @State profileName: string = 'No Profile';
+  @State selectedProxyGroup: string = 'Proxy';
+  @State selectedProxyName: string = 'Not selected';
   @State errorMsg: string = '';
+  @State showErrorDetail: boolean = false;
+  @State copyStatus: string = '';
   private service: IClashService | null = null;
   private trafficMonitor: TrafficMonitor = new TrafficMonitor();
+  private proxySelectionSubscriber: commonEventManager.CommonEventSubscriber | null = null;
 
   aboutToAppear(): void {
     try {
@@ -29,6 +38,8 @@ export struct HomePage {
     } catch (_e) {
       // service not ready
     }
+    this.refreshProfileSummary();
+    this.subscribeProxySelectionChanged();
     this.trafficMonitor.setCallback((data: TrafficData) => {
       this.traffic = data;
     });
@@ -36,6 +47,32 @@ export struct HomePage {
 
   aboutToDisappear(): void {
     this.trafficMonitor.stop();
+    this.unsubscribeProxySelectionChanged();
+  }
+
+  private subscribeProxySelectionChanged(): void {
+    if (this.proxySelectionSubscriber) {
+      return;
+    }
+    try {
+      const subscriber = commonEventManager.createSubscriberSync({
+        events: ['com.mx.clashhm.PROXY_SELECTION_CHANGED'],
+      });
+      this.proxySelectionSubscriber = subscriber;
+      commonEventManager.subscribe(subscriber, (_err, _data) => {
+        this.refreshProfileSummary();
+      });
+    } catch (e) {
+      Logger.error('Subscribe proxy selection failed: %{public}s', String(e));
+    }
+  }
+
+  private unsubscribeProxySelectionChanged(): void {
+    if (!this.proxySelectionSubscriber) {
+      return;
+    }
+    commonEventManager.unsubscribe(this.proxySelectionSubscriber);
+    this.proxySelectionSubscriber = null;
   }
 
   private async toggleConnection(): Promise<void> {
@@ -46,8 +83,11 @@ export struct HomePage {
     if (this.connectState === ConnectState.DISCONNECTED) {
       this.connectState = ConnectState.CONNECTING;
       this.errorMsg = '';
+      this.copyStatus = '';
+      this.showErrorDetail = false;
+      let context: common.UIAbilityContext | null = null;
       try {
-        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        context = this.getUIContext().getHostContext() as common.UIAbilityContext;
 
         // Find active subscription config first
         const subService = new SubscriptionService(context);
@@ -73,46 +113,237 @@ export struct HomePage {
         }
 
         // Start VPN Extension
-        const want: Want = {
-          bundleName: context.abilityInfo.bundleName,
-          abilityName: 'ClashVpnAbility',
-        };
+        const vpnStatusPath = `${context.filesDir}/vpn-engine-status.txt`;
+        const vpnStartConfigPath = `${context.filesDir}/vpn-start-config.txt`;
+        const configText = this.readTextFile(activeSub.filePath);
+        if (!configText) {
+          throw new Error(`Failed to read active subscription config: ${activeSub.filePath}`);
+        }
+        await this.ensureUiCoreStarted(context);
+        await this.stopVpnExtension(context);
+
+        const vpnTun2SocksConfig = this.createLocalTun2SocksConfig(Constants.DEFAULT_MIXED_PORT);
+        const configSession = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+        const vpnStatusEvent = `com.mx.clashhm.VPN_STATUS_${configSession}`;
+        const vpnStatusMessages: string[] = [];
+        const vpnStatusSubscriber = commonEventManager.createSubscriberSync({
+          events: [vpnStatusEvent],
+        });
+        commonEventManager.subscribe(vpnStatusSubscriber, (err, data) => {
+          if (err) {
+            this.writeConnectionStatus(vpnStatusPath, `ui vpn status event error: ${this.describeError(err)}`);
+            return;
+          }
+          const message = data.data || '';
+          if (message) {
+            vpnStatusMessages.push(message);
+            this.writeConnectionStatus(vpnStatusPath, `vpn ${message}`);
+          }
+        });
+        const chunkSize = 30000;
+        const chunkCount = Math.ceil(vpnTun2SocksConfig.length / chunkSize);
+        this.writeTextFile(vpnStartConfigPath, activeSub.filePath);
+        this.writeTextFile(vpnStatusPath, `${new Date().toISOString()} ui starting vpn extension config=${activeSub.filePath} tunChunks=${chunkCount}`);
         try {
+          const want: Want = {
+            deviceId: '',
+            bundleName: context.abilityInfo.bundleName,
+            moduleName: 'clash',
+            abilityName: 'ClashVpnAbility',
+            parameters: {
+              configPath: activeSub.filePath,
+              statusPath: vpnStatusPath,
+              statusEvent: vpnStatusEvent,
+              startConfigPath: vpnStartConfigPath,
+              configSession,
+              configChunkCount: chunkCount,
+            },
+          };
           await vpnExtension.startVpnExtensionAbility(want);
-          Logger.info('VPN Extension started');
+          this.writeConnectionStatus(vpnStatusPath, 'ui startVpnExtensionAbility returned');
+          await this.waitForVpnStatus(vpnStatusMessages, 'config subscriber ready', 5000);
+          for (let i = 0; i < chunkCount; i++) {
+            const chunk = vpnTun2SocksConfig.substring(i * chunkSize, Math.min(vpnTun2SocksConfig.length, (i + 1) * chunkSize));
+            await this.publishConfigChunk(context.abilityInfo.bundleName, configSession, i, chunkCount, chunk, 'tun');
+            this.writeConnectionStatus(vpnStatusPath, `ui config chunk published ${i + 1}/${chunkCount}`);
+          }
+          Logger.info('VPN Extension started and config chunks published');
+          this.writeConnectionStatus(vpnStatusPath, 'ui config chunks published');
+          await this.waitForVpnStartResult(vpnStatusMessages, 15000);
         } catch (e) {
-          Logger.error('Failed to start VPN: %{public}s', String(e));
+          const startError = this.describeError(e);
+          this.writeConnectionStatus(vpnStatusPath, `ui startVpnExtensionAbility failed: ${startError}`);
+          Logger.error('Failed to start VPN: %{public}s', startError);
+          throw new Error(`Failed to start VPN Extension: ${startError}`);
+        } finally {
+          commonEventManager.unsubscribe(vpnStatusSubscriber);
         }
 
-        // Wait for VPN to create TUN and set fd via NAPI
-        await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-
-        // Start engine with config
-        await this.service.start(activeSub.filePath);
-        this.connectState = ConnectState.CONNECTED;
+        this.service.setVpnConnected(true);
+        this.connectState = this.service.getState();
+        this.refreshProfileSummary();
         this.trafficMonitor.start();
       } catch (e) {
-        this.errorMsg = `Connection failed: ${String(e)}`;
-        Logger.error('Connection failed: %{public}s', String(e));
-        this.connectState = ConnectState.DISCONNECTED;
+        if (context) {
+          await this.stopVpnExtension(context);
+        }
+        if (this.service) {
+          this.service.setVpnConnected(false);
+        }
+        if (context && this.service) {
+          await this.ensureUiCoreStarted(context);
+        }
+        const errorText = this.describeError(e);
+        this.errorMsg = `Connection failed: ${errorText}`;
+        Logger.error('Connection failed: %{public}s', errorText);
+        this.connectState = this.service ? this.service.getState() : ConnectState.DISCONNECTED;
       }
     } else if (this.connectState === ConnectState.CONNECTED) {
-      await this.service.stop();
-      this.trafficMonitor.stop();
-      this.traffic = createEmptyTraffic();
-      this.connectState = ConnectState.DISCONNECTED;
-
-      // Stop VPN Extension
       try {
         const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-        const want: Want = {
-          bundleName: context.abilityInfo.bundleName,
-          abilityName: 'ClashVpnAbility',
-        };
-        await vpnExtension.stopVpnExtensionAbility(want);
+        await this.stopVpnExtension(context);
       } catch (e) {
         Logger.error('Failed to stop VPN: %{public}s', String(e));
       }
+
+      this.service.setVpnConnected(false);
+      await this.ensureUiCoreStarted(this.getUIContext().getHostContext() as common.UIAbilityContext);
+      this.trafficMonitor.stop();
+      this.traffic = createEmptyTraffic();
+      this.connectState = this.service.getState();
+      this.copyStatus = '';
+      this.refreshProfileSummary();
+    }
+  }
+
+  private async refreshProfileSummary(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const subService = new SubscriptionService(context);
+      await subService.init();
+      const activeSub = subService.getActiveSubscription();
+      if (!activeSub || !activeSub.filePath) {
+        this.profileName = 'No Profile';
+        this.selectedProxyGroup = 'Proxy';
+        this.selectedProxyName = 'Not selected';
+        return;
+      }
+
+      this.profileName = activeSub.name;
+      const selectionService = new ProxySelectionService();
+      await selectionService.init(context);
+      const selections = selectionService.getSelections();
+      const groups = new ConfigManager(context).parseProxyGroupsFromFile(activeSub.filePath);
+      let selectedGroup = '';
+      let selectedProxy = '';
+
+      for (const group of groups) {
+        const saved = selectionService.getSelection(group.name);
+        if (saved && group.all.indexOf(saved) >= 0) {
+          selectedGroup = group.name;
+          selectedProxy = saved;
+          if (this.isPrimaryProxyGroup(group.name)) {
+            break;
+          }
+        }
+      }
+
+      if (!selectedProxy) {
+        const group = this.pickPrimaryProxyGroup(groups);
+        if (group) {
+          selectedGroup = group.name;
+          selectedProxy = group.now || (group.all.length > 0 ? group.all[0] : '');
+        }
+      }
+
+      if (!selectedProxy && selections.length > 0) {
+        selectedGroup = selections[0].groupName;
+        selectedProxy = selections[0].proxyName;
+      }
+
+      this.selectedProxyGroup = selectedGroup || 'Proxy';
+      this.selectedProxyName = selectedProxy || 'Not selected';
+    } catch (e) {
+      Logger.error('Failed to refresh profile summary: %{public}s', String(e));
+    }
+  }
+
+  private pickPrimaryProxyGroup(groups: ProxyGroup[]): ProxyGroup | null {
+    let best: ProxyGroup | null = null;
+    let bestScore = -1;
+    for (const group of groups) {
+      let score = group.nodes.length;
+      if (this.isPrimaryProxyGroup(group.name)) {
+        score += 10000;
+      }
+      if (score > bestScore) {
+        best = group;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  private isPrimaryProxyGroup(name: string): boolean {
+    const lower = name.toLowerCase();
+    return lower === 'proxy' ||
+      lower === 'global' ||
+      lower.indexOf('select') >= 0 ||
+      lower.indexOf('node') >= 0 ||
+      name.indexOf('节点') >= 0 ||
+      name.indexOf('选择') >= 0;
+  }
+
+  private async applySavedProxySelections(context: common.UIAbilityContext): Promise<void> {
+    if (!this.service) {
+      return;
+    }
+    try {
+      const selectionService = new ProxySelectionService();
+      await selectionService.init(context);
+      const selections = selectionService.getSelections();
+      for (const selection of selections) {
+        if (selection.groupName && selection.proxyName) {
+          await this.service.selectProxy(selection.groupName, selection.proxyName);
+        }
+      }
+    } catch (e) {
+      Logger.error('Failed to apply saved proxy selections: %{public}s', String(e));
+    }
+  }
+
+  private async ensureUiCoreStarted(context: common.UIAbilityContext): Promise<void> {
+    if (!this.service || this.service.isCoreRunning()) {
+      return;
+    }
+    try {
+      const subService = new SubscriptionService(context);
+      await subService.init();
+      const activeSub = subService.getActiveSubscription();
+      if (!activeSub || !activeSub.filePath) {
+        return;
+      }
+      const configPath = `${context.filesDir}/app-core-config.yaml`;
+      const configText = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
+      this.writeTextFile(configPath, configText);
+      await this.service.startCore(configPath);
+      await this.applySavedProxySelections(context);
+    } catch (e) {
+      Logger.error('Failed to restart UI core: %{public}s', String(e));
+    }
+  }
+
+  private async stopVpnExtension(context: common.UIAbilityContext): Promise<void> {
+    try {
+      const want: Want = {
+        deviceId: '',
+        bundleName: context.abilityInfo.bundleName,
+        moduleName: 'clash',
+        abilityName: 'ClashVpnAbility',
+      };
+      await vpnExtension.stopVpnExtensionAbility(want);
+    } catch (e) {
+      Logger.error('Failed to stop VPN Extension: %{public}s', this.describeError(e));
     }
   }
 
@@ -123,88 +354,331 @@ export struct HomePage {
     }
   }
 
+  private async copyError(): Promise<void> {
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.errorMsg);
+      await pasteboard.getSystemPasteboard().setData(data);
+      this.copyStatus = 'Copied';
+    } catch (e) {
+      this.copyStatus = `Copy failed: ${String(e)}`;
+      Logger.error('Copy connection error failed: %{public}s', String(e));
+    }
+  }
+
+  private publishConfigChunk(bundleName: string, session: string, index: number, count: number, data: string, kind: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      commonEventManager.publish('com.mx.clashhm.CONFIG_CHUNK', {
+        bundleName,
+        data,
+        parameters: {
+          configSession: session,
+          configChunkIndex: index,
+          configChunkCount: count,
+          configKind: kind,
+        },
+      }, (err) => {
+        if (err) {
+          reject(new Error(this.describeError(err)));
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  private async waitForVpnStatus(messages: string[], expected: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const message of messages) {
+        if (message.indexOf(expected) >= 0) {
+          return;
+        }
+      }
+      await this.delay(100);
+    }
+    const recent = messages.length > 0 ? messages.slice(Math.max(0, messages.length - 30)).join('\n') : 'no vpn status events received';
+    throw new Error(`VPN Extension did not report "${expected}" within ${timeoutMs}ms; recentVpnStatus=\n${recent}`);
+  }
+
+  private async waitForVpnStartResult(messages: string[], timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const message of messages) {
+        const resultIndex = message.indexOf('start result:');
+        if (resultIndex < 0) {
+          continue;
+        }
+        const result = message.substring(resultIndex).trim();
+        if (result.indexOf('start result: started') >= 0 || result.indexOf('start result: already_running') >= 0) {
+          return;
+        }
+        throw new Error(result);
+      }
+      await this.delay(100);
+    }
+    const recent = messages.length > 0 ? messages.slice(Math.max(0, messages.length - 30)).join('\n') : 'no vpn status events received';
+    throw new Error(`VPN Extension did not report start result within ${timeoutMs}ms; recentVpnStatus=\n${recent}`);
+  }
+
+  private createLocalTun2SocksConfig(port: number): string {
+    return `tunnel:
+  name: vpn-tun
+  mtu: 1400
+  multi-queue: false
+  ipv4: 10.249.0.1
+
+socks5:
+  address: '127.0.0.1'
+  port: ${port}
+  udp: 'udp'
+
+misc:
+  task-stack-size: 24576
+  tcp-buffer-size: 4096
+  connect-timeout: 10000
+  tcp-read-write-timeout: 300000
+  udp-read-write-timeout: 60000
+  log-level: warn
+`;
+  }
+
+  private describeError(error: Object | string): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    const text = String(error);
+    if (text !== '[object Object]') {
+      return text;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch (_e) {
+      return text;
+    }
+  }
+
+  private writeConnectionStatus(path: string, message: string): void {
+    const oldText = this.readTextFile(path);
+    const nextText = oldText ? `${oldText}\n${new Date().toISOString()} ${message}` : `${new Date().toISOString()} ${message}`;
+    this.writeTextFile(path, nextText);
+  }
+
+  private writeTextFile(path: string, text: string): void {
+    try {
+      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, text);
+      fileIo.closeSync(file);
+    } catch (e) {
+      Logger.error('Failed to write file: %{public}s', this.describeError(e));
+    }
+  }
+
+  private readTextFile(path: string): string {
+    try {
+      const stat = fileIo.statSync(path);
+      if (stat.size <= 0) {
+        return '';
+      }
+      const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      const buffer = new ArrayBuffer(stat.size);
+      fileIo.readSync(file.fd, buffer);
+      fileIo.closeSync(file);
+      const bytes = new Uint8Array(buffer);
+      let text = '';
+      for (let i = 0; i < bytes.length; i++) {
+        text += String.fromCharCode(bytes[i]);
+      }
+      return text;
+    } catch (_e) {
+      return '';
+    }
+  }
+
   build() {
     Column() {
-      // Top bar
       Row() {
-        Text('ClashHM')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
+        Image($r('app.media.app_logo'))
+          .width(42)
+          .height(42)
+          .borderRadius(10)
+          .margin({ right: 12 })
 
-        Blank()
+        Column({ space: 4 }) {
+          Text('ClashHM')
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Text(this.profileName)
+            .fontSize(13)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-        Text('⋮')
-          .fontSize(24)
-          .fontColor($r('app.color.text_secondary'))
+        Button('Logs')
+          .height(34)
+          .fontSize(13)
+          .fontColor($r('app.color.primary'))
+          .backgroundColor($r('app.color.card_bg'))
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .padding({ left: 14, right: 14 })
           .onClick(() => {
             this.getUIContext().getRouter().pushUrl({ url: 'pages/LogPage' });
           })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 12, bottom: 8 })
+      .padding({ left: 20, right: 20, top: 18, bottom: 12 })
 
-      // Profile name
-      Row() {
-        Text('▸')
-          .fontSize(14)
-          .fontColor($r('app.color.text_secondary'))
-        Text(this.profileName)
-          .fontSize(14)
-          .fontColor($r('app.color.text_secondary'))
-          .margin({ left: 6 })
-      }
-      .margin({ bottom: 8 })
+      Column({ space: 18 }) {
+        ConnectButton({
+          state: this.connectState,
+          onTap: () => {
+            this.toggleConnection();
+          }
+        })
 
-      // Mode selector
-      Row({ space: 0 }) {
-        ForEach(
-          [
-            new ModeItem(ConnectionMode.RULE, 'Rule'),
-            new ModeItem(ConnectionMode.GLOBAL, 'Global'),
-            new ModeItem(ConnectionMode.DIRECT, 'Direct'),
-          ] as ModeItem[],
-          (item: ModeItem) => {
-            Text(item.label)
-              .fontSize(13)
-              .fontWeight(this.currentMode === item.mode ? FontWeight.Medium : FontWeight.Normal)
-              .fontColor(this.currentMode === item.mode ? Color.White : $r('app.color.text_secondary'))
-              .backgroundColor(this.currentMode === item.mode ? $r('app.color.primary') : Color.Transparent)
-              .borderRadius(16)
-              .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-              .onClick(() => {
-                this.switchMode(item.mode as ConnectionMode);
-              })
-          },
-          (item: ModeItem) => item.mode
-        )
-      }
-      .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(20)
-      .padding(3)
-      .margin({ bottom: 32 })
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(this.selectedProxyGroup)
+              .fontSize(11)
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.selectedProxyName)
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
 
-      // Connect button
-      ConnectButton({
-        state: this.connectState,
-        onTap: () => {
-          this.toggleConnection();
+          Text('Proxy')
+            .fontSize(12)
+            .fontColor($r('app.color.primary'))
+            .height(30)
+            .padding({ left: 12, right: 12, top: 7 })
+            .backgroundColor($r('app.color.page_bg'))
+            .borderRadius(7)
         }
-      })
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor($r('app.color.page_bg'))
+        .borderRadius(8)
 
-      if (this.errorMsg) {
-        Text(this.errorMsg)
-          .fontSize(13)
-          .fontColor($r('app.color.error_color'))
-          .textAlign(TextAlign.Center)
-          .padding({ left: 20, right: 20, top: 12 })
-          .maxLines(2)
+        if (this.errorMsg) {
+          Column({ space: 8 }) {
+            Row({ space: 8 }) {
+              Text('Connection error')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.error_color'))
+                .layoutWeight(1)
+
+              Button('Copy')
+                .height(28)
+                .fontSize(12)
+                .fontColor($r('app.color.primary'))
+                .backgroundColor($r('app.color.card_bg'))
+                .borderRadius(7)
+                .padding({ left: 10, right: 10 })
+                .onClick(() => {
+                  this.copyError();
+                })
+
+              Button(this.showErrorDetail ? 'Hide' : 'Details')
+                .height(28)
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'))
+                .backgroundColor($r('app.color.card_bg'))
+                .borderRadius(7)
+                .padding({ left: 10, right: 10 })
+                .onClick(() => {
+                  this.showErrorDetail = !this.showErrorDetail;
+                })
+            }
+
+            if (!this.showErrorDetail) {
+              Text(this.errorMsg)
+                .fontSize(12)
+                .fontColor($r('app.color.error_color'))
+                .width('100%')
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .copyOption(CopyOptions.LocalDevice)
+            }
+
+            if (this.copyStatus) {
+              Text(this.copyStatus)
+                .fontSize(10)
+                .fontColor(this.copyStatus === 'Copied' ? $r('app.color.connected_color') : $r('app.color.error_color'))
+                .width('100%')
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+
+            if (this.showErrorDetail) {
+              TextArea({ text: this.errorMsg })
+                .width('100%')
+                .height(112)
+                .fontSize(11)
+                .fontColor($r('app.color.text_primary'))
+                .backgroundColor($r('app.color.card_bg'))
+                .borderRadius(8)
+                .copyOption(CopyOptions.LocalDevice)
+                .enabled(true)
+            }
+          }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .backgroundColor($r('app.color.page_bg'))
+            .borderRadius(8)
+        }
+
+        Row({ space: 8 }) {
+          ForEach(
+            [
+              new ModeItem(ConnectionMode.RULE, 'Rule'),
+              new ModeItem(ConnectionMode.GLOBAL, 'Global'),
+              new ModeItem(ConnectionMode.DIRECT, 'Direct'),
+            ] as ModeItem[],
+            (item: ModeItem) => {
+              Text(item.label)
+                .fontSize(13)
+                .fontWeight(this.currentMode === item.mode ? FontWeight.Bold : FontWeight.Medium)
+                .fontColor(this.currentMode === item.mode ? Color.White : $r('app.color.text_secondary'))
+                .textAlign(TextAlign.Center)
+                .layoutWeight(1)
+                .height(34)
+                .padding({ top: 8 })
+                .backgroundColor(this.currentMode === item.mode ? $r('app.color.primary') : $r('app.color.page_bg'))
+                .borderRadius(7)
+                .onClick(() => {
+                  this.switchMode(item.mode as ConnectionMode);
+                })
+            },
+            (item: ModeItem) => item.mode
+          )
+        }
+        .width('100%')
       }
+      .width('100%')
+      .padding(18)
+      .backgroundColor($r('app.color.card_bg'))
+      .borderRadius(8)
+      .border({ width: 1, color: $r('app.color.divider') })
+      .margin({ left: 16, right: 16, bottom: 14 })
 
-      Blank()
-        .layoutWeight(1)
-
-      // Traffic stats
       TrafficStats({
         uploadSpeed: this.traffic.uploadSpeed,
         downloadSpeed: this.traffic.downloadSpeed,
@@ -212,12 +686,18 @@ export struct HomePage {
         sessionDownload: this.traffic.sessionDownload,
         activeConnections: this.traffic.activeConnections,
       })
-      .padding({ left: 16, right: 16, bottom: 20 })
+      .padding({ left: 16, right: 16 })
+
+      Blank()
+        .layoutWeight(1)
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_bg'))
     .alignItems(HorizontalAlign.Center)
+    .onAppear(() => {
+      this.refreshProfileSummary();
+    })
   }
 }
 

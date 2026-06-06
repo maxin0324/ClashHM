@@ -7,15 +7,15 @@ import "C"
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"sync"
 	"time"
 	"unsafe"
 
+	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/config"
 	"github.com/metacubex/mihomo/constant"
-	"github.com/metacubex/mihomo/hub/executor"
+	"github.com/metacubex/mihomo/hub"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
 	"github.com/metacubex/mihomo/tunnel/statistic"
@@ -31,7 +31,7 @@ type ProxyInfo struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	Alive   bool   `json:"alive"`
-	Latency uint16 `json:"latency"`
+	Latency int    `json:"latency"`
 }
 
 type GroupInfo struct {
@@ -68,17 +68,43 @@ type ConnectionInfo struct {
 func returnJSON(v interface{}) *C.char {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return C.CString(`{"error":"` + err.Error() + `"}`)
+		fallback, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return C.CString(string(fallback))
 	}
 	return C.CString(string(data))
 }
 
+func returnStatus(status string) *C.char {
+	return returnJSON(map[string]string{"status": status})
+}
+
+func returnError(message string) *C.char {
+	return returnJSON(map[string]string{"error": message})
+}
+
+func normalizeDelay(delay uint16) int {
+	if delay == 0 || delay >= 65535 {
+		return -1
+	}
+	return int(delay)
+}
+
 //export ClashInit
 func ClashInit(homeDirC *C.char) *C.char {
+	if homeDirC == nil {
+		return returnError("home dir is nil")
+	}
 	homeDir := C.GoString(homeDirC)
-	os.MkdirAll(homeDir, 0755)
+	if homeDir == "" {
+		return returnError("home dir is empty")
+	}
+	if stat, err := os.Stat(homeDir); err != nil {
+		return returnError("stat home dir: " + err.Error())
+	} else if !stat.IsDir() {
+		return returnError("home dir is not a directory")
+	}
 	constant.SetHomeDir(homeDir)
-	return C.CString(`{"status":"ok"}`)
+	return returnStatus("ok")
 }
 
 //export ClashStartFile
@@ -87,18 +113,48 @@ func ClashStartFile(configPathC *C.char) *C.char {
 	defer mu.Unlock()
 
 	if isRunning {
-		return C.CString(`{"error":"already running"}`)
+		return returnError("already running")
 	}
 
+	if configPathC == nil {
+		return returnError("config path is nil")
+	}
 	path := C.GoString(configPathC)
+	if path == "" {
+		return returnError("config path is empty")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return C.CString(fmt.Sprintf(`{"error":"read file: %s"}`, err.Error()))
+		return returnError("read file: " + err.Error())
 	}
 
+	return startBytes(data)
+}
+
+//export ClashStartContent
+func ClashStartContent(configC *C.char) *C.char {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if isRunning {
+		return returnError("already running")
+	}
+
+	if configC == nil {
+		return returnError("config content is nil")
+	}
+	data := []byte(C.GoString(configC))
+	if len(data) == 0 {
+		return returnError("config content is empty")
+	}
+
+	return startBytes(data)
+}
+
+func startBytes(data []byte) *C.char {
 	cfg, err := config.Parse(data)
 	if err != nil {
-		return C.CString(fmt.Sprintf(`{"error":"parse config: %s"}`, err.Error()))
+		return returnError("parse config: " + err.Error())
 	}
 
 	// Inject TUN fd from VPN Extension
@@ -108,10 +164,13 @@ func ClashStartFile(configPathC *C.char) *C.char {
 		log.Infoln("ClashHM: injecting TUN fd=%d", tunFd)
 	}
 
-	executor.ApplyConfig(cfg, true)
+	cfg.Controller.ExternalController = "0.0.0.0:9090"
+	cfg.Controller.Secret = ""
+
+	hub.ApplyConfig(cfg)
 	isRunning = true
 	log.Infoln("ClashHM engine started")
-	return C.CString(`{"status":"ok"}`)
+	return returnStatus("ok")
 }
 
 //export ClashStop
@@ -148,32 +207,54 @@ func ClashGetProxies() *C.char {
 	for name, proxy := range proxies {
 		adapter := proxy.Adapter()
 		adapterType := adapter.Type().String()
+		groupAdapter, ok := adapter.(outboundgroup.ProxyGroup)
+		if !ok {
+			continue
+		}
 
 		info := GroupInfo{
 			Name: name,
 			Type: adapterType,
+			Now:  groupAdapter.Now(),
 		}
 
-		if nowAdapter, ok := adapter.(interface{ Now() string }); ok {
-			info.Now = nowAdapter.Now()
-		}
-
-		if allAdapter, ok := adapter.(interface{ All() []string }); ok {
-			info.All = allAdapter.All()
-			for _, nodeName := range info.All {
-				if nodeProxy, exists := proxies[nodeName]; exists {
-					node := ProxyInfo{
-						Name:    nodeName,
-						Type:    nodeProxy.Adapter().Type().String(),
-						Alive:   nodeProxy.AliveForTestUrl(""),
-						Latency: nodeProxy.LastDelayForTestUrl(""),
-					}
-					info.Nodes = append(info.Nodes, node)
-				}
+		for _, nodeProxy := range groupAdapter.Proxies() {
+			nodeName := nodeProxy.Name()
+			info.All = append(info.All, nodeName)
+			node := ProxyInfo{
+				Name:    nodeName,
+				Type:    nodeProxy.Adapter().Type().String(),
+				Alive:   nodeProxy.AliveForTestUrl(""),
+				Latency: normalizeDelay(nodeProxy.LastDelayForTestUrl("")),
 			}
+			info.Nodes = append(info.Nodes, node)
 		}
 
-		if info.All != nil {
+		groups = append(groups, info)
+	}
+
+	if len(groups) == 0 {
+		info := GroupInfo{
+			Name: "Proxy",
+			Type: "Selector",
+		}
+		for name, proxy := range proxies {
+			adapter := proxy.Adapter()
+			if _, ok := adapter.(outboundgroup.ProxyGroup); ok {
+				continue
+			}
+			info.All = append(info.All, name)
+			if info.Now == "" {
+				info.Now = name
+			}
+			info.Nodes = append(info.Nodes, ProxyInfo{
+				Name:    name,
+				Type:    adapter.Type().String(),
+				Alive:   proxy.AliveForTestUrl(""),
+				Latency: normalizeDelay(proxy.LastDelayForTestUrl("")),
+			})
+		}
+		if len(info.Nodes) > 0 {
 			groups = append(groups, info)
 		}
 	}
@@ -192,7 +273,7 @@ func ClashSelectProxy(groupNameC *C.char, proxyNameC *C.char) C.int {
 		return -1
 	}
 
-	if setter, ok := proxy.Adapter().(interface{ Set(string) error }); ok {
+	if setter, ok := proxy.Adapter().(outboundgroup.SelectAble); ok {
 		if err := setter.Set(proxyName); err != nil {
 			return -2
 		}

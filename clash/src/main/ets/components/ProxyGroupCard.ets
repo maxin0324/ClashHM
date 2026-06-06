@@ -1,47 +1,59 @@
 import { ProxyGroup } from '../models/ClashConfig';
 import { ProxyNodeItem } from './ProxyNodeItem';
-import { Constants } from '../common/Constants';
 
 @Component
 export struct ProxyGroupCard {
   @ObjectLink group: ProxyGroupModel;
+  @Prop canTestLatency: boolean = false;
+  @Prop isTesting: boolean = false;
   onSelectProxy: (groupName: string, proxyName: string) => void = () => {};
-  onTestLatency: (groupName: string) => void = () => {};
+  onTestGroup: (groupName: string) => void = () => {};
 
   build() {
     Column() {
-      // Header
       Row() {
-        Column({ space: 2 }) {
+        Column({ space: 4 }) {
           Text(this.group.name)
             .fontSize(16)
-            .fontWeight(FontWeight.Medium)
+            .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(`${this.group.type} · ${this.group.now}`)
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Button('Test')
-          .type(ButtonType.Normal)
-          .height(28)
+        Text(this.isTesting ? '...' : 'ms')
           .fontSize(12)
-          .fontColor($r('app.color.primary'))
-          .backgroundColor(Color.Transparent)
-          .borderWidth(1)
-          .borderColor($r('app.color.primary'))
-          .borderRadius(14)
-          .padding({ left: 12, right: 12 })
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.canTestLatency ? $r('app.color.primary') : $r('app.color.text_secondary'))
+          .width(38)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .padding({ top: 7 })
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius(7)
+          .opacity(this.canTestLatency ? 1 : 0.48)
+          .margin({ left: 10 })
           .onClick(() => {
-            this.onTestLatency(this.group.name);
+            if (this.canTestLatency && !this.isTesting) {
+              this.onTestGroup(this.group.name);
+            }
           })
 
-        Text(this.group.expanded ? '▲' : '▼')
-          .fontSize(14)
+        Text(this.group.expanded ? '⌃' : '⌄')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_secondary'))
-          .margin({ left: 8 })
+          .width(34)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .margin({ left: 10 })
           .onClick(() => {
             this.getUIContext().animateTo({ duration: 200 }, () => {
               this.group.expanded = !this.group.expanded;
@@ -51,7 +63,6 @@ export struct ProxyGroupCard {
       .width('100%')
       .padding({ left: 16, right: 16, top: 14, bottom: 14 })
 
-      // Node list
       if (this.group.expanded) {
         Divider()
           .color($r('app.color.divider'))
@@ -83,6 +94,8 @@ export struct ProxyGroupCard {
             Text(name)
               .fontSize(14)
               .fontColor($r('app.color.text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
               .margin({ left: 12 })
 
             Blank()
@@ -104,7 +117,8 @@ export struct ProxyGroupCard {
     }
     .width('100%')
     .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(12)
+    .borderRadius(8)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 
   private getBuiltinOptions(): string[] {

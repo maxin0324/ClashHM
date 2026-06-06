@@ -12,6 +12,7 @@ local.properties
 
 # Compiled binaries (build with mihomo-bridge/build.sh)
 mihomo-bridge/libmihomo.so
+mihomo-bridge/libmihomo_patched.so
 mihomo-bridge/libmihomo.h
 mihomo-bridge/mihomo
 clash/src/main/cpp/libs/

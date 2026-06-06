@@ -40,13 +40,13 @@ export class TrafficMonitor {
     return this.currentData;
   }
 
-  private poll(): void {
+  private async poll(): Promise<void> {
     try {
       const service = getClashService();
       if (service.getState() !== ConnectState.CONNECTED) {
         return;
       }
-      this.currentData = service.getTraffic();
+      this.currentData = await service.getTrafficAsync();
       if (this.callback) {
         this.callback(this.currentData);
       }

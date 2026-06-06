@@ -1,4 +1,4 @@
-import clashNapi from 'libclash.so';
+import clashNapi, { ClashNativeModule } from 'libclash.so';
 import { IClashService } from './ClashService';
 import { ProxyGroup, ProxyNode, ConnectState, ConnectionMode } from '../models/ClashConfig';
 import { TrafficData, createEmptyTraffic } from '../models/TrafficData';
@@ -6,6 +6,8 @@ import { LogEntry, LogType } from '../models/LogEntry';
 import { Logger } from '../common/Logger';
 import { Constants } from '../common/Constants';
 import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { resourceManager } from '@kit.LocalizationKit';
 
 interface NapiProxyNode {
   name: string;
@@ -50,44 +52,82 @@ interface NapiResult {
   error: string;
 }
 
+function getNativeModule(): ClashNativeModule {
+  if (clashNapi === undefined) {
+    throw new Error('libclash.so import is undefined; native initializer was not called');
+  }
+  if (clashNapi.default) {
+    return clashNapi.default;
+  }
+  return clashNapi;
+}
+
 function callInit(dir: string): string {
-  return clashNapi.init(dir);
+  return getNativeModule().init(dir);
 }
 
 function callLoadEngine(libDir: string): string {
-  return clashNapi.loadEngine(libDir);
+  return getNativeModule().loadEngine(libDir);
 }
 
 function callStartFile(path: string): string {
-  return clashNapi.startFile(path);
+  return getNativeModule().startFile(path);
 }
 
 function callGetProxies(): string {
-  return clashNapi.getProxies();
+  return getNativeModule().getProxies();
 }
 
 function callGetTraffic(): string {
-  return clashNapi.getTraffic();
+  return getNativeModule().getTraffic();
 }
 
 function callGetConnections(): string {
-  return clashNapi.getConnections();
+  return getNativeModule().getConnections();
 }
 
 function callGetMode(): string {
-  return clashNapi.getMode();
+  return getNativeModule().getMode();
+}
+
+function callStop(): void {
+  getNativeModule().stop();
 }
 
 function callIsRunning(): number {
-  return clashNapi.isRunning();
+  return getNativeModule().isRunning();
 }
 
 function callSelectProxy(group: string, proxy: string): number {
-  return clashNapi.selectProxy(group, proxy);
+  return getNativeModule().selectProxy(group, proxy);
 }
 
 function callTestDelay(name: string, url: string, timeout: number): number {
-  return clashNapi.testDelay(name, url, timeout);
+  return getNativeModule().testDelay(name, url, timeout);
+}
+
+function callCloseConnection(id: string): void {
+  getNativeModule().closeConnection(id);
+}
+
+function callCloseAllConnections(): void {
+  getNativeModule().closeAllConnections();
+}
+
+function callSetMode(mode: string): void {
+  getNativeModule().setMode(mode);
+}
+
+function callSetTunFd(fd: number): void {
+  getNativeModule().setTunFd(fd);
+}
+
+function parseNapiResult(raw: string, action: string): NapiResult {
+  try {
+    return JSON.parse(raw) as NapiResult;
+  } catch (e) {
+    throw new Error(`${action} returned invalid JSON: ${String(e)}; raw=${raw}`);
+  }
 }
 
 export class NapiClashService implements IClashService {
@@ -104,49 +144,74 @@ export class NapiClashService implements IClashService {
   constructor(context: common.UIAbilityContext) {
     this.context = context;
 
-    // Try multiple directories to find libmihomo.so
     const searchDirs: string[] = [
-      context.bundleCodeDir,
+      '',
       context.bundleCodeDir + '/libs/arm64',
       context.bundleCodeDir + '/libs/arm64-v8a',
       '/data/storage/el1/bundle/libs/arm64',
-      context.filesDir,
+      '/data/storage/el1/bundle/libs/arm64-v8a',
+      context.bundleCodeDir,
     ];
 
     let loaded: boolean = false;
+    let lastLoadResult: string = '';
     for (const dir of searchDirs) {
-      const result: string = callLoadEngine(dir);
-      Logger.info('ClashNapi loadEngine(%{public}s): %{public}s', dir, result);
-      if (result.startsWith('loaded')) {
+      const loadResult: string = callLoadEngine(dir);
+      Logger.info('ClashNapi loadEngine(%{public}s): %{public}s', dir, loadResult);
+      lastLoadResult = loadResult;
+      if (loadResult.startsWith('loaded')) {
         loaded = true;
         break;
       }
     }
-
     if (!loaded) {
-      Logger.error('Failed to load mihomo engine from any path');
+      throw new Error('mihomo engine not available: ' + lastLoadResult);
     }
 
     const homeDir: string = context.filesDir;
+    this.ensureGeoDatabase(homeDir);
     const initResult: string = callInit(homeDir);
     Logger.info('ClashNapi init: %{public}s', initResult);
+    const initParsed: NapiResult = parseNapiResult(initResult, 'init');
+    if (initParsed.error) {
+      throw new Error(initParsed.error);
+    }
+  }
+
+  private ensureGeoDatabase(homeDir: string): void {
+    const targetPath: string = `${homeDir}/geoip.metadb`;
+    try {
+      const mgr: resourceManager.ResourceManager = this.context.resourceManager;
+      const data: Uint8Array = mgr.getRawFileContentSync('geoip.metadb');
+
+      let shouldCopy: boolean = true;
+      try {
+        const stat = fileIo.statSync(targetPath);
+        shouldCopy = stat.size !== data.length;
+      } catch (_e) {
+        shouldCopy = true;
+      }
+
+      if (!shouldCopy) {
+        Logger.info('GeoIP database already present: %{public}s', targetPath);
+        return;
+      }
+
+      const file = fileIo.openSync(targetPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      const buf = data.buffer as ArrayBuffer;
+      fileIo.writeSync(file.fd, buf);
+      fileIo.closeSync(file);
+      Logger.info('GeoIP database copied to %{public}s (%{public}s bytes)', targetPath, String(data.length));
+    } catch (e) {
+      Logger.error('Failed to prepare GeoIP database: %{public}s', String(e));
+    }
   }
 
   async start(configPath: string): Promise<void> {
     this.state = ConnectState.CONNECTING;
     try {
-      const resultStr: string = callStartFile(configPath);
-      const parsed: NapiResult = JSON.parse(resultStr) as NapiResult;
-      if (parsed.error) {
-        this.state = ConnectState.DISCONNECTED;
-        throw new Error(parsed.error);
-      }
-      this.state = ConnectState.CONNECTED;
-      this.prevUpload = 0;
-      this.prevDownload = 0;
-      this.sessionUpload = 0;
-      this.sessionDownload = 0;
-      this.refreshMode();
+      await this.startCoreInternal(configPath, 'startFile');
+      this.setVpnConnected(true);
       Logger.info('Clash engine started');
     } catch (e) {
       this.state = ConnectState.DISCONNECTED;
@@ -157,17 +222,51 @@ export class NapiClashService implements IClashService {
     }
   }
 
+  async startCore(configPath: string): Promise<void> {
+    await this.startCoreInternal(configPath, 'startCore');
+  }
+
+  private async startCoreInternal(configPath: string, action: string): Promise<void> {
+    const resultStr: string = callStartFile(configPath);
+    Logger.info('ClashNapi %{public}s: %{public}s', action, resultStr);
+    const parsed: NapiResult = parseNapiResult(resultStr, action);
+    if (parsed.error) {
+      throw new Error(parsed.error);
+    }
+    this.refreshMode();
+  }
+
   async stop(): Promise<void> {
-    clashNapi.stop();
+    callStop();
     this.state = ConnectState.DISCONNECTED;
     this.lastTraffic = createEmptyTraffic();
     Logger.info('Clash engine stopped');
   }
 
+  isCoreRunning(): boolean {
+    try {
+      return callIsRunning() !== 0;
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  setVpnConnected(connected: boolean): void {
+    this.state = connected ? ConnectState.CONNECTED : ConnectState.DISCONNECTED;
+    if (connected) {
+      this.prevUpload = 0;
+      this.prevDownload = 0;
+      this.sessionUpload = 0;
+      this.sessionDownload = 0;
+      this.lastTraffic = createEmptyTraffic();
+    }
+  }
+
   async reload(configPath: string): Promise<void> {
-    clashNapi.stop();
+    callStop();
     const resultStr: string = callStartFile(configPath);
-    const parsed: NapiResult = JSON.parse(resultStr) as NapiResult;
+    Logger.info('ClashNapi reload startFile: %{public}s', resultStr);
+    const parsed: NapiResult = parseNapiResult(resultStr, 'reload');
     if (parsed.error) {
       throw new Error(parsed.error);
     }
@@ -201,6 +300,10 @@ export class NapiClashService implements IClashService {
       Logger.error('Failed to get proxies: %{public}s', String(e));
       return this.cachedGroups;
     }
+  }
+
+  async getProxyGroupsAsync(): Promise<ProxyGroup[]> {
+    return this.getProxyGroups();
   }
 
   async selectProxy(groupName: string, proxyName: string): Promise<void> {
@@ -270,6 +373,10 @@ export class NapiClashService implements IClashService {
     }
   }
 
+  async getTrafficAsync(): Promise<TrafficData> {
+    return this.getTraffic();
+  }
+
   getConnections(): LogEntry[] {
     try {
       const jsonStr: string = callGetConnections();
@@ -298,17 +405,16 @@ export class NapiClashService implements IClashService {
   }
 
   async closeConnection(id: string): Promise<void> {
-    clashNapi.closeConnection(id);
+    callCloseConnection(id);
   }
 
   async closeAllConnections(): Promise<void> {
-    clashNapi.closeAllConnections();
+    callCloseAllConnections();
   }
 
   getState(): ConnectState {
     if (this.state === ConnectState.CONNECTED) {
-      const running: number = callIsRunning();
-      if (running === 0) {
+      if (!this.isCoreRunning()) {
         this.state = ConnectState.DISCONNECTED;
       }
     }
@@ -321,12 +427,12 @@ export class NapiClashService implements IClashService {
   }
 
   async setMode(mode: ConnectionMode): Promise<void> {
-    clashNapi.setMode(mode);
+    callSetMode(mode);
     this.mode = mode;
   }
 
   setTunFd(fd: number): void {
-    clashNapi.setTunFd(fd);
+    callSetTunFd(fd);
   }
 
   private refreshMode(): void {

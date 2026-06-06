@@ -1,5 +1,4 @@
 # ClashHM
-
 HarmonyOS NEXT 平台的 Clash 代理客户端，基于 [mihomo](https://github.com/metacubex/mihomo) (Clash.Meta) 内核。
 
 ## 功能特性

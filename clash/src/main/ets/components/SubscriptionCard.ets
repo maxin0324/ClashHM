@@ -17,21 +17,20 @@ export struct SubscriptionCard {
   }
 
   build() {
-    Column({ space: 8 }) {
-      // Header row
+    Column({ space: 10 }) {
       Row() {
-        Column({ space: 2 }) {
+        Column({ space: 4 }) {
           Row({ space: 8 }) {
             Text(this.sub.name)
               .fontSize(16)
-              .fontWeight(FontWeight.Medium)
+              .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
 
             if (this.sub.isActive) {
-              Text('IN USE')
+              Text('Active')
                 .fontSize(10)
                 .fontColor(Color.White)
                 .backgroundColor($r('app.color.connected_color'))
@@ -51,7 +50,6 @@ export struct SubscriptionCard {
       }
       .width('100%')
 
-      // Info row
       Row() {
         Text(`${this.sub.nodeCount} nodes`)
           .fontSize(12)
@@ -78,7 +76,6 @@ export struct SubscriptionCard {
       }
       .width('100%')
 
-      // Data usage bar
       if (this.sub.totalData > 0) {
         Column({ space: 4 }) {
           Progress({ value: this.getUsagePercent(), total: 100, type: ProgressType.Linear })
@@ -101,44 +98,37 @@ export struct SubscriptionCard {
         }
       }
 
-      // Action buttons
       Row({ space: 8 }) {
         Blank()
 
-        Button($r('app.string.update_subscription'))
+        Button('Update')
           .type(ButtonType.Normal)
-          .height(30)
+          .height(32)
+          .width(64)
           .fontSize(12)
           .fontColor($r('app.color.primary'))
-          .backgroundColor(Color.Transparent)
-          .borderWidth(1)
-          .borderColor($r('app.color.primary'))
-          .borderRadius(15)
-          .padding({ left: 14, right: 14 })
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius(7)
           .onClick(() => this.onUpdate())
 
-        Button($r('app.string.edit_subscription'))
+        Button('Edit')
           .type(ButtonType.Normal)
-          .height(30)
+          .height(32)
+          .width(52)
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
-          .backgroundColor(Color.Transparent)
-          .borderWidth(1)
-          .borderColor($r('app.color.divider'))
-          .borderRadius(15)
-          .padding({ left: 14, right: 14 })
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius(7)
           .onClick(() => this.onEdit())
 
-        Button($r('app.string.delete_subscription'))
+        Button('Delete')
           .type(ButtonType.Normal)
-          .height(30)
+          .height(32)
+          .width(60)
           .fontSize(12)
           .fontColor($r('app.color.error_color'))
-          .backgroundColor(Color.Transparent)
-          .borderWidth(1)
-          .borderColor($r('app.color.error_color'))
-          .borderRadius(15)
-          .padding({ left: 14, right: 14 })
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius(7)
           .onClick(() => this.onDelete())
       }
       .width('100%')
@@ -146,7 +136,8 @@ export struct SubscriptionCard {
     .width('100%')
     .padding(16)
     .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(12)
+    .borderRadius(8)
+    .border({ width: 1, color: this.sub.isActive ? $r('app.color.primary') : $r('app.color.divider') })
     .onClick(() => this.onTap())
   }
 }

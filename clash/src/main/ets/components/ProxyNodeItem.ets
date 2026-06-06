@@ -34,11 +34,12 @@ export struct ProxyNodeItem {
   }
 
   build() {
-    Row() {
-      Radio({ value: this.node.name, group: 'proxy_select' })
-        .checked(this.isSelected)
-        .width(20)
-        .height(20)
+    Row({ space: 12 }) {
+      Row()
+        .width(10)
+        .height(10)
+        .borderRadius(5)
+        .backgroundColor(this.isSelected ? $r('app.color.primary') : $r('app.color.divider'))
 
       Column({ space: 2 }) {
         Text(this.node.name)
@@ -50,7 +51,6 @@ export struct ProxyNodeItem {
           .fontSize(10)
           .fontColor($r('app.color.text_secondary'))
       }
-      .margin({ left: 12 })
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
@@ -58,11 +58,13 @@ export struct ProxyNodeItem {
         .fontSize(12)
         .fontColor(this.getLatencyColor())
         .fontWeight(FontWeight.Medium)
+        .textAlign(TextAlign.End)
+        .width(72)
     }
     .width('100%')
-    .height(52)
+    .height(50)
     .padding({ left: 16, right: 16 })
-    .backgroundColor(this.isSelected ? '#1A007AFF' : Color.Transparent)
+    .backgroundColor(this.isSelected ? '#102563EB' : Color.Transparent)
     .onClick(() => {
       this.onTap();
     })
