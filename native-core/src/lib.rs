@@ -2049,6 +2049,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
     guard.proxies = proxies;
     guard.groups = groups;
     guard.rules = rules;
+    guard.delay_by_proxy.clear();
     guard.running = false;
     guard.last_traffic_at_ms = now_ms();
     guard.last_upload_total = 0;
@@ -2121,6 +2122,25 @@ pub extern "C" fn clashhm_native_core_is_running() -> c_int {
     } else {
         0
     }
+}
+
+#[no_mangle]
+pub extern "C" fn clashhm_native_core_load_config(clash_config: *const c_char) -> c_int {
+    let Ok(config) = cstr_to_string(clash_config) else {
+        return -1;
+    };
+    let (proxies, groups, rules) = parse_clash_config(&config);
+    if proxies.is_empty() || groups.is_empty() {
+        return -2;
+    }
+    let mut guard = state().lock().unwrap();
+    guard.proxies = proxies;
+    guard.groups = groups;
+    guard.rules = rules;
+    guard.delay_by_proxy.clear();
+    guard.status = "config_loaded_for_latency".to_string();
+    guard.last_error.clear();
+    0
 }
 
 #[no_mangle]
@@ -2571,6 +2591,36 @@ rules:
 
         assert!(json.contains("\"latency\":123"), "{json}");
         assert!(json.contains("\"alive\":true"), "{json}");
+    }
+
+    #[test]
+    fn load_config_populates_state_without_starting_tun() {
+        let config = CString::new(
+            r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rules:
+  - MATCH,Proxy
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(clashhm_native_core_load_config(config.as_ptr()), 0);
+        assert_eq!(clashhm_native_core_is_running(), 0);
+        let proxies_ptr = clashhm_native_core_get_proxies_json();
+        let proxies = unsafe { CStr::from_ptr(proxies_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        clashhm_native_core_free_string(proxies_ptr);
+
+        assert!(proxies.contains("\"name\":\"Proxy\""), "{proxies}");
+        assert!(proxies.contains("\"name\":\"A\""), "{proxies}");
     }
 
     #[test]

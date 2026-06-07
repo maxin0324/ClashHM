@@ -93,9 +93,10 @@ Current repository state:
 - Proxy selection is applied in the Extension. If the embedded backend is already running, selecting a new proxy rebuilds the selected-node shoes config and restarts the TUN runner. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
 - `url-test` and `fallback` groups update their selected node from native-core latency results. This is a selection improvement, not yet full Clash URL-test behavior because the current latency probe still measures proxy server TCP reachability rather than making the configured HTTP request through every protocol implementation.
 - The UI process no longer starts the mihomo preview core on app launch, connect, disconnect, proxy refresh, or latency testing. Proxy refresh is config-backed; latency testing is executed through the Extension native-core while connected.
+- When VPN is disconnected, Proxy page latency testing loads the current config into the UI process native-core for TCP server reachability checks only. This does not start TUN or a proxy data plane in the UI process.
 - When Home appears, the UI queries Extension status and marks the connection as active if the Extension native core is still running.
 - While connected, UI traffic polling and the log page query the Extension command channel.
-- `testDelay` currently performs a native TCP connect probe to the parsed node server/port, caches the result for `getProxies`, and feeds cached results into `url-test` / `fallback` group selection. Full Clash URL-test semantics are still pending.
+- `testDelay` currently performs a native TCP connect probe to the parsed node server/port, caches the result for `getProxies`, and feeds cached results into `url-test` / `fallback` group selection. The same probe can run locally while disconnected after loading config into native-core. Full Clash URL-test semantics are still pending.
 - `getStatus` returns structured runtime state: backend engine name, running flag, TUN fd, status text, last adapter/backend error, selected group/proxy, parsed proxy/group/rule counts, uptime, and last latency probe result.
 - `getTraffic` and `getConnections` are exposed through the native boundary. They currently return placeholders until shoes traffic accounting and connection tracking are wired.
 - `clash_bridge.cpp` exports optional NAPI functions prefixed with `nativeCore`.
@@ -188,7 +189,7 @@ The root-cause fix is complete only when all of these pass:
 - Reopening the app reconnects to Extension state and shows current proxy/traffic.
 - Proxy page can show groups before VPN connects by parsing config, and after VPN connects from Extension state.
 - Node selection persists and is applied before the VPN starts routing traffic.
-- Latency tests work through Extension native-core while VPN is connected; disconnected latency testing needs a separate non-VPN preview design and must not reintroduce UI-process mihomo.
+- Latency tests work through Extension native-core while VPN is connected and through local native-core TCP probes while disconnected. Disconnected tests must remain TCP reachability only and must not reintroduce UI-process mihomo.
 - Failure messages identify unsupported protocol/config rather than timing out.
 
 ## Non-Goals

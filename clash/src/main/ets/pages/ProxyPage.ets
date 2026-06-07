@@ -5,7 +5,8 @@ import { SubscriptionService } from '../services/SubscriptionService';
 import { ConfigManager } from '../services/ConfigManager';
 import { ProxySelectionService } from '../services/ProxySelectionService';
 import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
-import { callNativeCoreParseProxies } from '../services/NativeClash';
+import { callNativeCoreGetProxies, callNativeCoreLoadConfig, callNativeCoreParseProxies, callNativeCoreTestDelay } from '../services/NativeClash';
+import { Constants } from '../common/Constants';
 import { common } from '@kit.AbilityKit';
 import { commonEventManager } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -317,26 +318,42 @@ export struct ProxyPage {
   }
 
   private async testGroupLatency(groupName: string): Promise<void> {
-    if (!this.isServiceConnected()) {
-      this.sourceMsg = 'Connect VPN to test latency';
-      return;
-    }
     this.testingGroup = groupName;
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const extensionService = new NativeCoreExtensionService(context);
-      for (const group of this.groups) {
-        if (group.name !== groupName) {
-          continue;
+      if (this.isServiceConnected()) {
+        const extensionService = new NativeCoreExtensionService(context);
+        for (const group of this.groups) {
+          if (group.name !== groupName) {
+            continue;
+          }
+          for (const node of group.nodes) {
+            const delay = await extensionService.testDelay(node.name);
+            node.latency = delay.code;
+            node.alive = delay.ok && delay.code > 0;
+          }
+          break;
         }
-        for (const node of group.nodes) {
-          const delay = await extensionService.testDelay(node.name);
-          node.latency = delay.code;
-          node.alive = delay.ok && delay.code > 0;
+        await this.syncGroupStateFromExtension(context, extensionService, groupName);
+      } else {
+        const prepared = await this.prepareLocalNativeCoreForLatency(context);
+        if (!prepared) {
+          this.sourceMsg = 'No local proxy config for latency test';
+          return;
         }
-        break;
+        for (const group of this.groups) {
+          if (group.name !== groupName) {
+            continue;
+          }
+          for (const node of group.nodes) {
+            const delay = callNativeCoreTestDelay(node.name, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT);
+            node.latency = delay;
+            node.alive = delay > 0;
+          }
+          break;
+        }
+        await this.syncGroupStateFromNativeJson(context, callNativeCoreGetProxies(), groupName);
       }
-      await this.syncGroupStateFromExtension(context, extensionService, groupName);
       this.sourceMsg = 'Latency updated';
     } catch (e) {
       this.sourceMsg = `Latency test failed: ${String(e)}`;
@@ -346,13 +363,43 @@ export struct ProxyPage {
     }
   }
 
+  private async prepareLocalNativeCoreForLatency(context: common.UIAbilityContext): Promise<boolean> {
+    try {
+      const subService = new SubscriptionService(context);
+      await subService.init();
+      const activeSub = subService.getActiveSubscription();
+      if (!activeSub || !activeSub.filePath) {
+        return false;
+      }
+      const configText = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
+      if (!configText) {
+        return false;
+      }
+      return callNativeCoreLoadConfig(configText) >= 0;
+    } catch (e) {
+      Logger.info('Prepare local native-core latency config failed: %{public}s', String(e));
+      return false;
+    }
+  }
+
   private async syncGroupStateFromExtension(context: common.UIAbilityContext, extensionService: NativeCoreExtensionService, groupName: string): Promise<void> {
     try {
       const result = await extensionService.getProxies();
       if (!result.ok || !result.data) {
         return;
       }
-      const extensionGroups = JSON.parse(result.data) as ExtensionProxyGroup[];
+      await this.syncGroupStateFromNativeJson(context, result.data, groupName);
+    } catch (e) {
+      Logger.info('Sync proxy group from Extension failed: %{public}s', String(e));
+    }
+  }
+
+  private async syncGroupStateFromNativeJson(context: common.UIAbilityContext, jsonText: string, groupName: string): Promise<void> {
+    try {
+      if (!jsonText) {
+        return;
+      }
+      const extensionGroups = JSON.parse(jsonText) as ExtensionProxyGroup[];
       const mappedGroups = this.mapExtensionGroups(extensionGroups);
       for (const mappedGroup of mappedGroups) {
         if (mappedGroup.name !== groupName) {
@@ -380,7 +427,7 @@ export struct ProxyPage {
         }
       }
     } catch (e) {
-      Logger.info('Sync proxy group from Extension failed: %{public}s', String(e));
+      Logger.info('Sync proxy group from native JSON failed: %{public}s', String(e));
     }
   }
 
@@ -507,7 +554,7 @@ export struct ProxyPage {
             ListItem() {
               ProxyGroupCard({
                 group: group,
-                canTestLatency: this.isServiceConnected() && group.nodes.length > 0,
+                canTestLatency: group.nodes.length > 0,
                 isTesting: this.testingGroup === group.name,
                 onSelectProxy: (gName: string, pName: string) => {
                   this.selectProxy(gName, pName);

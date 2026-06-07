@@ -30,6 +30,10 @@ export function callNativeCoreGetProxies(): string {
   return getNativeModule().nativeCoreGetProxies();
 }
 
+export function callNativeCoreLoadConfig(configText: string): number {
+  return getNativeModule().nativeCoreLoadConfig(configText);
+}
+
 export function callNativeCoreParseProxies(configText: string): string {
   return getNativeModule().nativeCoreParseProxies(configText);
 }

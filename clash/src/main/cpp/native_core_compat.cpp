@@ -59,6 +59,12 @@ extern "C" int clashhm_native_core_is_running(void) {
     return 0;
 }
 
+extern "C" int clashhm_native_core_load_config(const char* clash_config) {
+    const size_t len = clash_config ? strlen(clash_config) : 0;
+    g_last_error = "native_core_cpp_compat: Rust native-core staticlib is missing; configLen=" + std::to_string(len);
+    return -1001;
+}
+
 extern "C" char* clashhm_native_core_get_proxies_json(void) {
     return copy_string("[]");
 }

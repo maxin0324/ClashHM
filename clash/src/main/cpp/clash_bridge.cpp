@@ -95,6 +95,23 @@ static napi_value NapiNativeCoreGetProxies(napi_env env, napi_callback_info) {
     return returnOwnedNativeCoreString(env, clashhm_native_core_get_proxies_json());
 }
 
+static napi_value NapiNativeCoreLoadConfig(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc < 1) {
+        return returnInt(env, -1);
+    }
+
+    char* configText = getNapiString(env, args[0]);
+    if (!configText) {
+        return returnInt(env, -2);
+    }
+    int ret = clashhm_native_core_load_config(configText);
+    free(configText);
+    return returnInt(env, ret);
+}
+
 static napi_value NapiNativeCoreParseProxies(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
@@ -174,6 +191,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"nativeCoreStop", nullptr, NapiNativeCoreStop, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreIsRunning", nullptr, NapiNativeCoreIsRunning, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreGetProxies", nullptr, NapiNativeCoreGetProxies, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeCoreLoadConfig", nullptr, NapiNativeCoreLoadConfig, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreParseProxies", nullptr, NapiNativeCoreParseProxies, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreSelectProxy", nullptr, NapiNativeCoreSelectProxy, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreTestDelay", nullptr, NapiNativeCoreTestDelay, nullptr, nullptr, nullptr, napi_default, nullptr},

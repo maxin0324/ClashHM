@@ -9,6 +9,7 @@ int clashhm_native_core_init(const char* home_dir);
 int clashhm_native_core_start_tun(int tun_fd, const char* clash_config);
 int clashhm_native_core_stop(void);
 int clashhm_native_core_is_running(void);
+int clashhm_native_core_load_config(const char* clash_config);
 char* clashhm_native_core_get_proxies_json(void);
 char* clashhm_native_core_parse_proxies_json(const char* clash_config);
 int clashhm_native_core_select_proxy(const char* group_name, const char* proxy_name);
