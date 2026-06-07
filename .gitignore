@@ -9,6 +9,7 @@
 /.appanalyzer
 /.bitfun
 local.properties
+artifacts/
 
 # Rust native core build products
 native-core/target/

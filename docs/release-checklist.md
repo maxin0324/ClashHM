@@ -19,6 +19,25 @@ cd native-core
 OHOS_NATIVE_HOME=/path/to/openharmony/native ./build-ohos.sh
 ```
 
+For GitHub releases, also produce a standalone native-core artifact:
+
+```bash
+bash scripts/package-native-core-artifact.sh
+```
+
+The generated archive contains:
+
+- `libclashhm_native_core.a`
+- `native_core.h`
+- `MANIFEST.txt`
+- a sibling `.sha256` checksum file
+
+The artifact can be restored into a checkout with:
+
+```bash
+bash scripts/install-native-core-artifact.sh /path/to/clashhm-native-core-ohos-arm64-*.tar.gz
+```
+
 ## Pre-Release Validation
 
 Run before tagging a release:
@@ -61,8 +80,9 @@ Unsupported protocols must produce clear diagnostics instead of silent fallback.
 ## GitHub Hygiene
 
 - Do not commit HAP outputs or `build/` directories.
-- Keep `clash/src/main/cpp/native-core/libclashhm_native_core.a` only because DevEco needs it for no-Rust builds.
-- Consider moving the static library to Git LFS or release artifacts once the native-core ABI stabilizes.
+- Keep `clash/src/main/cpp/native-core/libclashhm_native_core.a` only while DevEco no-Rust builds need a checked-in artifact.
+- Publish `scripts/package-native-core-artifact.sh` output with release builds.
+- Move the static library out of Git history and into Git LFS or release artifacts once the native-core ABI stabilizes.
 - Keep README focused on app usage and current support status.
 - Keep implementation details in `docs/`.
 

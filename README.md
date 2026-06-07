@@ -130,6 +130,13 @@ Then build the app in DevEco Studio:
 3. Build HAP.
 4. Install and run on a real device.
 
+Native-core release artifacts can be packaged or installed with:
+
+```bash
+bash scripts/package-native-core-artifact.sh
+bash scripts/install-native-core-artifact.sh /path/to/clashhm-native-core-ohos-arm64-*.tar.gz
+```
+
 ## Project Layout
 
 ```text
