@@ -11,6 +11,7 @@ use super::selection::ConfigSelection;
 #[derive(Debug, Clone)]
 pub struct RuleConfig {
     pub masks: OneOrSome<NetLocationMask>,
+    pub domain_keywords: Vec<String>,
     pub action: RuleActionConfig,
 }
 
@@ -18,6 +19,7 @@ impl Default for RuleConfig {
     fn default() -> Self {
         Self {
             masks: OneOrSome::One(NetLocationMask::ANY),
+            domain_keywords: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: None,
                 client_chains: NoneOrSome::One(ClientChain::default()),
@@ -185,6 +187,8 @@ impl<'de> Deserialize<'de> for RuleConfig {
         struct RuleConfigTemp {
             #[serde(alias = "mask")]
             masks: Option<OneOrSome<NetLocationMask>>,
+            #[serde(default)]
+            domain_keywords: NoneOrSome<String>,
             // Action fields (from RuleActionConfig)
             #[serde(default)]
             action: Option<String>,
@@ -270,7 +274,11 @@ impl<'de> Deserialize<'de> for RuleConfig {
             }
         };
 
-        Ok(RuleConfig { masks, action })
+        Ok(RuleConfig {
+            masks,
+            domain_keywords: temp.domain_keywords.into_vec(),
+            action,
+        })
     }
 }
 
@@ -281,7 +289,7 @@ impl Serialize for RuleConfig {
     {
         use serde::ser::SerializeMap;
 
-        // Count fields: masks + action fields
+        // Count fields: masks + optional domain_keywords + action fields
         let action_field_count = match &self.action {
             RuleActionConfig::Block => 1, // action
             RuleActionConfig::Allow {
@@ -299,10 +307,18 @@ impl Serialize for RuleConfig {
             }
         };
 
-        let mut map = serializer.serialize_map(Some(1 + action_field_count))?;
+        let domain_keyword_count = if self.domain_keywords.is_empty() {
+            0
+        } else {
+            1
+        };
+        let mut map = serializer.serialize_map(Some(1 + domain_keyword_count + action_field_count))?;
 
         // Serialize masks
         map.serialize_entry("masks", &self.masks)?;
+        if !self.domain_keywords.is_empty() {
+            map.serialize_entry("domain_keywords", &self.domain_keywords)?;
+        }
 
         // Serialize action fields (flattened)
         match &self.action {
@@ -609,6 +625,7 @@ mod tests {
                 NetLocationMask::from("192.168.0.0/16:80").unwrap(),
                 NetLocationMask::from("10.0.0.0/8:443").unwrap(),
             ]),
+            domain_keywords: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: Some(NetLocation::from_ip_addr(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),

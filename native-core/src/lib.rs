@@ -1637,10 +1637,28 @@ fn rule_mask(rule: &ClashRule) -> Option<String> {
     }
 }
 
+fn build_domain_keyword_rule_yaml(
+    keyword: &str,
+    target: &str,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+) -> Result<String, String> {
+    match build_rule_client_chain(target, groups, proxies)? {
+        Some(chain) => Ok(format!(
+            "    - masks: \"0.0.0.0/0\"\n      domain_keywords: {}\n      action: allow\n      client_chain:\n{chain}",
+            yaml_quote(keyword)
+        )),
+        None => Ok(format!(
+            "    - masks: \"0.0.0.0/0\"\n      domain_keywords: {}\n      action: block\n",
+            yaml_quote(keyword)
+        )),
+    }
+}
+
 fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
     let mut types = Vec::new();
     for rule in rules {
-        if rule_mask(rule).is_some() {
+        if rule.rule_type == "DOMAIN-KEYWORD" || rule_mask(rule).is_some() {
             continue;
         }
         if !types.contains(&rule.rule_type) {
@@ -1653,7 +1671,7 @@ fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
 fn skipped_rule_count(rules: &[ClashRule]) -> usize {
     rules
         .iter()
-        .filter(|rule| rule_mask(rule).is_none())
+        .filter(|rule| rule.rule_type != "DOMAIN-KEYWORD" && rule_mask(rule).is_none())
         .count()
 }
 
@@ -1708,6 +1726,15 @@ fn build_shoes_rules(
 ) -> Result<String, String> {
     let mut out = String::new();
     for rule in rules {
+        if rule.rule_type == "DOMAIN-KEYWORD" {
+            out.push_str(&build_domain_keyword_rule_yaml(
+                &rule.payload,
+                &rule.target,
+                groups,
+                proxies,
+            )?);
+            continue;
+        }
         let Some(mask) = rule_mask(rule) else {
             continue;
         };
@@ -2311,6 +2338,7 @@ proxy-groups:
     proxies:
       - A
 rules:
+  - DOMAIN-KEYWORD,google,Proxy
   - DOMAIN-SUFFIX,example.com,DIRECT
   - IP-CIDR,10.0.0.0/8,DIRECT
   - MATCH,Proxy
@@ -2832,8 +2860,8 @@ rules:
             .unwrap()
             .to_string();
         clashhm_native_core_free_string(status_ptr);
-        assert!(status.contains("\"skippedRuleCount\":2"), "{status}");
-        assert!(status.contains("DOMAIN-KEYWORD"), "{status}");
+        assert!(status.contains("\"skippedRuleCount\":1"), "{status}");
+        assert!(!status.contains("DOMAIN-KEYWORD"), "{status}");
         assert!(status.contains("GEOIP"), "{status}");
     }
 
@@ -2925,6 +2953,7 @@ rules:
         assert_eq!(rules.len(), 3);
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
         assert!(shoes_config.contains("0.0.0.0/0"));
+        assert!(shoes_config.contains("domain_keywords: \"google\""));
     }
 
     #[test]

@@ -46,6 +46,7 @@ Supported rule handling currently covers common Clash rules such as:
 - `MATCH`
 - `DOMAIN`
 - `DOMAIN-SUFFIX`
+- `DOMAIN-KEYWORD`
 - `IP-CIDR`
 - `IP-CIDR6`
 - `DST-PORT`
@@ -58,7 +59,6 @@ Still unsupported or incomplete:
 - gRPC transport
 - Clash/Xray `network: h2` transport
 - GEOIP / GEOSITE routing
-- DOMAIN-KEYWORD routing
 - simple-obfs / obfs Shadowsocks plugins
 - Full Clash-compatible URL-test behavior
 

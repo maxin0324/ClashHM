@@ -9,9 +9,9 @@ Current state:
 - Defines the stable native API.
 - Parses Clash config with `serde_yaml` first, then falls back to the older line parser. This is closer to mihomo's tolerant YAML handling and supports common block and flow-style subscription output.
 - Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and common YAML-native inline `rule-providers[].payload` referenced by `RULE-SET`.
-- Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `IP-CIDR`, `IP-CIDR6`, and `DST-PORT` to shoes TUN rules.
-- Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `IP-CIDR`, `IP-CIDR6`, or `DST-PORT`.
-- Skips currently unsupported routing rules such as `DOMAIN-KEYWORD`, `GEOIP`, `GEOSITE`, and unexpanded/advanced `RULE-SET`, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
+- Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, and `DST-PORT` to shoes TUN rules.
+- Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, or `DST-PORT`.
+- Skips currently unsupported routing rules such as `GEOIP`, `GEOSITE`, and unexpanded/advanced `RULE-SET`, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
 - Receives provider-expanded Clash config from the ArkTS config layer. Remote `proxy-providers` are materialized during subscription update; local provider nodes are expanded before the config is sent to the Extension.
 - Returns deterministic status from the embedded backend.
 - Vendors the patched `shoes` backend under `native-core/vendor/shoes`, so builds no longer depend on a temporary `/tmp` checkout.

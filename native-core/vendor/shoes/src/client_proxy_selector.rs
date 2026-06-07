@@ -113,12 +113,29 @@ impl RoutingCache {
 #[derive(Debug)]
 pub struct ConnectRule {
     pub masks: Vec<NetLocationMask>,
+    pub domain_keywords: Vec<String>,
     pub action: ConnectAction,
 }
 
 impl ConnectRule {
     pub fn new(masks: Vec<NetLocationMask>, action: ConnectAction) -> Self {
-        Self { masks, action }
+        Self {
+            masks,
+            domain_keywords: Vec::new(),
+            action,
+        }
+    }
+
+    pub fn with_domain_keywords(
+        masks: Vec<NetLocationMask>,
+        domain_keywords: Vec<String>,
+        action: ConnectAction,
+    ) -> Self {
+        Self {
+            masks,
+            domain_keywords,
+            action,
+        }
     }
 }
 
@@ -427,6 +444,18 @@ async fn match_rule(
     resolve_rule_hostnames: bool,
 ) -> std::io::Result<Option<usize>> {
     for (rule_index, rule) in rules.iter().enumerate() {
+        if !rule.domain_keywords.is_empty() {
+            if matches_domain_keywords(&rule.domain_keywords, location.location().address().hostname())
+            {
+                debug!(
+                    "Found matching domain keyword for {} -> {:?}",
+                    location.location(),
+                    rule.domain_keywords
+                );
+                return Ok(Some(rule_index));
+            }
+            continue;
+        }
         for mask in rule.masks.iter() {
             match match_mask(
                 mask,
@@ -462,6 +491,18 @@ async fn match_rule(
         }
     }
     Ok(None)
+}
+
+#[inline]
+fn matches_domain_keywords(keywords: &[String], hostname: Option<&str>) -> bool {
+    let Some(hostname) = hostname else {
+        return false;
+    };
+    let hostname = hostname.to_ascii_lowercase();
+    keywords.iter().any(|keyword| {
+        let keyword = keyword.trim();
+        !keyword.is_empty() && hostname.contains(&keyword.to_ascii_lowercase())
+    })
 }
 
 enum MatchMaskError {
@@ -650,6 +691,14 @@ mod tests {
             .map(|s| NetLocationMask::from(s).unwrap())
             .collect();
         ConnectRule::new(masks, ConnectAction::new_block())
+    }
+
+    fn keyword_block_rule(keywords: Vec<&str>) -> ConnectRule {
+        ConnectRule::with_domain_keywords(
+            vec![NetLocationMask::ANY],
+            keywords.into_iter().map(|item| item.to_string()).collect(),
+            ConnectAction::new_block(),
+        )
     }
 
     /// Helper to create an allow rule with address override
@@ -920,6 +969,30 @@ mod tests {
 
         let location = NetLocation::new(Address::Hostname("example.com".to_string()), 80);
         let decision = selector.judge(location.into(), &resolver).await.unwrap();
+        match decision {
+            ConnectDecision::Allow { .. } => {}
+            ConnectDecision::Block => panic!("Expected Allow"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hostname_keyword_match() {
+        let rules = vec![
+            keyword_block_rule(vec!["google"]),
+            allow_rule(vec!["0.0.0.0/0"], "default"),
+        ];
+        let selector = ClientProxySelector::new(rules);
+        let resolver = mock_resolver();
+
+        let blocked = NetLocation::new(Address::Hostname("www.google.com".to_string()), 443);
+        let decision = selector.judge(blocked.into(), &resolver).await.unwrap();
+        match decision {
+            ConnectDecision::Block => {}
+            ConnectDecision::Allow { .. } => panic!("Expected Block"),
+        }
+
+        let allowed = NetLocation::new(Address::Hostname("www.example.com".to_string()), 443);
+        let decision = selector.judge(allowed.into(), &resolver).await.unwrap();
         match decision {
             ConnectDecision::Allow { .. } => {}
             ConnectDecision::Block => panic!("Expected Allow"),

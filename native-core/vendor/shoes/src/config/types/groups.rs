@@ -286,6 +286,7 @@ mod tests {
                 NetLocationMask::from("192.168.0.0/16:80").unwrap(),
                 NetLocationMask::from("10.0.0.0/8:443").unwrap(),
             ]),
+            domain_keywords: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: Some(NetLocation::from_ip_addr(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -379,6 +380,7 @@ client_proxies:
                 create_test_rule_config(),
                 RuleConfig {
                     masks: OneOrSome::One(NetLocationMask::ANY),
+                    domain_keywords: Vec::new(),
                     action: RuleActionConfig::Block,
                 },
             ]),

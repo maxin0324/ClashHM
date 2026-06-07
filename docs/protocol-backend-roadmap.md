@@ -102,13 +102,13 @@ The embedded backend currently models routing through `NetLocationMask`. This ha
 - `MATCH`
 - `DOMAIN`
 - `DOMAIN-SUFFIX`
+- `DOMAIN-KEYWORD`
 - `IP-CIDR`
 - `IP-CIDR6`
 - `DST-PORT`
 
 The following need backend matcher expansion:
 
-- `DOMAIN-KEYWORD`
 - `GEOIP`
 - `GEOSITE`
 - advanced / unresolved `RULE-SET`
@@ -118,10 +118,9 @@ Current behavior is explicit diagnostic fallback: unsupported rules are skipped,
 ## Recommended Implementation Order
 
 1. Finish rule matcher expansion before new transport protocols.
-2. Add `DOMAIN-KEYWORD` as a native matcher type.
-3. Add local MMDB/dat based `GEOIP` / `GEOSITE` support.
-4. Add gRPC and HTTP/2 transports for VMess/VLESS/Trojan.
-5. Add HY2 and TUIC only after the backend has a real QUIC client path.
+2. Add local MMDB/dat based `GEOIP` / `GEOSITE` support.
+3. Add gRPC and HTTP/2 transports for VMess/VLESS/Trojan.
+4. Add HY2 and TUIC only after the backend has a real QUIC client path.
 
 Reasoning: rule and DNS correctness affects every existing protocol, while HY2/TUIC only affect subscriptions that use those node types.
 
