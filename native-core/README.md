@@ -14,9 +14,10 @@ Current state:
 - Receives provider-expanded Clash config from the ArkTS config layer. Remote `proxy-providers` are materialized during subscription update; local provider nodes are expanded before the config is sent to the Extension.
 - Returns deterministic status from the embedded backend.
 - Vendors the patched `shoes` backend under `native-core/vendor/shoes`, so builds no longer depend on a temporary `/tmp` checkout.
-- With `shoes-backend`, converts the selected Clash node into a shoes TUN config and starts the shoes TUN runner. The current adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/HTTPS, VMess, VLESS, Trojan, and TLS/WebSocket/Reality/ShadowTLS wrappers for the selected node.
+- With `shoes-backend`, converts the selected Clash node into a shoes TUN config and starts the shoes TUN runner. The current adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/HTTPS, VMess, VLESS, Trojan, TLS/WebSocket/Reality/ShadowTLS wrappers, and `mux`/`h2mux` options for VMess/VLESS/Trojan.
 - Parses common nested Clash options for supported transports, including `ws-opts.path`, `ws-opts.headers.Host`, `reality-opts.public-key`, `reality-opts.short-id`, `reality-opts.server-name`, `tls-opts`, and ShadowTLS `plugin-opts`.
-- Fails explicitly for unsupported outbound protocols or transports such as Hysteria2, TUIC, `network: grpc`, and `network: h2`. These still need protocol adapter work or a mature core implementation before they can be treated as fully supported.
+- Honors common `udp: false` on supported nodes.
+- Fails explicitly for unsupported outbound protocols or transports such as Hysteria2, TUIC, `network: grpc`, and `network: h2`. The vendored shoes client config does not currently expose Hysteria2/TUIC outbound variants, and Clash/Xray `network: h2` is not the same protocol as shoes/sing-box h2mux, so these must not be silently mapped to TCP or h2mux.
 - Applies proxy selection inside the Extension. Current running selections are recorded quickly and take effect on the next VPN core start; hot backend reload is still a later task. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
 - The patched shoes backend converts TUN UDP/53 DNS queries into DNS-over-TCP over the selected proxy chain. This avoids the common Trojan UDP gap where the VPN appears connected but domains cannot resolve.
 - Provides a basic TCP connect latency probe for parsed proxy nodes. Full Clash-style URL testing is still a later adapter task.

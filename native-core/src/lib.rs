@@ -421,12 +421,28 @@ fn assign_tls_opt(proxy: &mut ProxyNode, key: &str, value: String) {
     }
 }
 
+fn assign_h2mux_opt(proxy: &mut ProxyNode, key: &str, value: String) {
+    match key {
+        "enabled" | "enable" => assign_proxy_field(proxy, "h2mux-enabled", value),
+        "max-connections" | "max_connections" => {
+            assign_proxy_field(proxy, "h2mux-max-connections", value)
+        }
+        "min-streams" | "min_streams" => assign_proxy_field(proxy, "h2mux-min-streams", value),
+        "max-streams" | "max_streams" => assign_proxy_field(proxy, "h2mux-max-streams", value),
+        "padding" => assign_proxy_field(proxy, "h2mux-padding", value),
+        _ => {
+            proxy.fields.insert(format!("h2mux-{key}"), value);
+        }
+    }
+}
+
 fn assign_proxy_nested_field(proxy: &mut ProxyNode, section: &str, key: &str, value: String) {
     match section {
         "plugin-opts" => assign_plugin_opt(proxy, key, value),
         "ws-opts" | "ws-headers" => assign_ws_opt(proxy, key, value),
         "reality-opts" => assign_reality_opt(proxy, key, value),
         "tls-opts" => assign_tls_opt(proxy, key, value),
+        "h2mux" | "mux" | "smux" => assign_h2mux_opt(proxy, key, value),
         _ => assign_proxy_field(proxy, key, value),
     }
 }
@@ -537,6 +553,15 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "server-name",
         "server_name",
         "flow",
+        "udp",
+        "mux",
+        "h2mux",
+        "smux",
+        "h2mux-enabled",
+        "h2mux-max-connections",
+        "h2mux-min-streams",
+        "h2mux-max-streams",
+        "h2mux-padding",
         "plugin",
         "shadow-tls-password",
         "shadowtls-password",
@@ -555,7 +580,15 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
             }
         }
     }
-    for section in ["plugin-opts", "ws-opts", "reality-opts", "tls-opts"] {
+    for section in [
+        "plugin-opts",
+        "ws-opts",
+        "reality-opts",
+        "tls-opts",
+        "h2mux",
+        "mux",
+        "smux",
+    ] {
         if let Some(serde_yaml::Value::Mapping(nested)) = yaml_mapping_get(mapping, section) {
             assign_proxy_yaml_nested(&mut proxy, section, nested);
         }
@@ -968,6 +1001,45 @@ fn falsy(value: &str) -> bool {
     lower == "false" || lower == "0" || lower == "no"
 }
 
+fn proxy_udp_enabled(proxy: &ProxyNode) -> bool {
+    let udp = proxy_field(proxy, "udp");
+    udp.is_empty() || truthy(udp)
+}
+
+fn h2mux_enabled(proxy: &ProxyNode) -> bool {
+    let h2mux = proxy_field(proxy, "h2mux");
+    let smux = proxy_field(proxy, "smux");
+    let mux = proxy_field(proxy, "mux");
+    let enabled = proxy_field_any(proxy, &["h2mux-enabled", "mux-enabled", "smux-enabled"]);
+    truthy(h2mux) || truthy(smux) || truthy(mux) || truthy(enabled)
+}
+
+fn append_h2mux_yaml(proxy: &ProxyNode, out: &mut String, pad: &str) {
+    if !h2mux_enabled(proxy) {
+        return;
+    }
+    out.push_str(&format!("{pad}h2mux:\n"));
+    let max_connections = proxy_field(proxy, "h2mux-max-connections");
+    let min_streams = proxy_field(proxy, "h2mux-min-streams");
+    let max_streams = proxy_field(proxy, "h2mux-max-streams");
+    let padding = proxy_field(proxy, "h2mux-padding");
+    if !max_connections.is_empty() {
+        out.push_str(&format!("{pad}  max_connections: {max_connections}\n"));
+    }
+    if !min_streams.is_empty() {
+        out.push_str(&format!("{pad}  min_streams: {min_streams}\n"));
+    }
+    if !max_streams.is_empty() {
+        out.push_str(&format!("{pad}  max_streams: {max_streams}\n"));
+    }
+    if !padding.is_empty() {
+        out.push_str(&format!(
+            "{pad}  padding: {}\n",
+            if truthy(padding) { "true" } else { "false" }
+        ));
+    }
+}
+
 fn selected_proxy<'a>(groups: &'a [ProxyGroup], proxies: &'a [ProxyNode]) -> Option<&'a ProxyNode> {
     let mut selected_name = String::new();
     for group in groups {
@@ -1046,9 +1118,10 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             ));
         }
         return Ok(format!(
-            "{pad}type: shadowsocks\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: true\n",
+            "{pad}type: shadowsocks\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(cipher),
-            yaml_quote(password)
+            yaml_quote(password),
+            if proxy_udp_enabled(proxy) { "true" } else { "false" }
         ));
     }
 
@@ -1062,9 +1135,10 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             ));
         }
         return Ok(format!(
-            "{pad}type: snell\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: true\n",
+            "{pad}type: snell\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(cipher),
-            yaml_quote(password)
+            yaml_quote(password),
+            if proxy_udp_enabled(proxy) { "true" } else { "false" }
         ));
     }
 
@@ -1100,11 +1174,14 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             return Err(format!("vmess proxy {} missing uuid", proxy.name));
         }
         let cipher = proxy_field(proxy, "cipher");
-        return Ok(format!(
-            "{pad}type: vmess\n{pad}cipher: {}\n{pad}user_id: {}\n{pad}udp_enabled: true\n",
+        let mut out = format!(
+            "{pad}type: vmess\n{pad}cipher: {}\n{pad}user_id: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(if cipher.is_empty() { "any" } else { cipher }),
-            yaml_quote(user_id)
-        ));
+            yaml_quote(user_id),
+            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+        );
+        append_h2mux_yaml(proxy, &mut out, &pad);
+        return Ok(out);
     }
 
     if proxy_type == "vless" {
@@ -1112,10 +1189,13 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
         if user_id.is_empty() {
             return Err(format!("vless proxy {} missing uuid", proxy.name));
         }
-        return Ok(format!(
-            "{pad}type: vless\n{pad}user_id: {}\n{pad}udp_enabled: true\n",
-            yaml_quote(user_id)
-        ));
+        let mut out = format!(
+            "{pad}type: vless\n{pad}user_id: {}\n{pad}udp_enabled: {}\n",
+            yaml_quote(user_id),
+            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+        );
+        append_h2mux_yaml(proxy, &mut out, &pad);
+        return Ok(out);
     }
 
     if proxy_type == "trojan" {
@@ -1123,10 +1203,9 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
         if password.is_empty() {
             return Err(format!("trojan proxy {} missing password", proxy.name));
         }
-        return Ok(format!(
-            "{pad}type: trojan\n{pad}password: {}\n",
-            yaml_quote(password)
-        ));
+        let mut out = format!("{pad}type: trojan\n{pad}password: {}\n", yaml_quote(password));
+        append_h2mux_yaml(proxy, &mut out, &pad);
+        return Ok(out);
     }
 
     if proxy_type == "anytls" || proxy_type == "any-tls" {
@@ -1135,8 +1214,9 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             return Err(format!("anytls proxy {} missing password", proxy.name));
         }
         return Ok(format!(
-            "{pad}type: anytls\n{pad}password: {}\n{pad}udp_enabled: true\n",
-            yaml_quote(password)
+            "{pad}type: anytls\n{pad}password: {}\n{pad}udp_enabled: {}\n",
+            yaml_quote(password),
+            if proxy_udp_enabled(proxy) { "true" } else { "false" }
         ));
     }
 
@@ -2041,6 +2121,25 @@ rules:
     }
 
     #[test]
+    fn rejects_tuic_protocol_explicitly() {
+        let config = r#"
+proxies:
+  - { name: TUIC, type: tuic, server: tuic.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - TUIC
+rules:
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let result = build_shoes_tun_config(28, &groups, &proxies, &rules);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("tuic"));
+    }
+
+    #[test]
     fn resolves_group_selection_to_direct() {
         let config = r#"
 proxies:
@@ -2101,6 +2200,54 @@ proxy-groups:
         assert!(shoes_config.contains("type: ws"));
         assert!(shoes_config.contains("matching_path: \"/ws\""));
         assert!(shoes_config.contains("type: vmess"));
+    }
+
+    #[test]
+    fn builds_vmess_h2mux_config_from_clash_mux() {
+        let config = r#"
+proxies:
+  - name: VMess Mux
+    type: vmess
+    server: mux.example.com
+    port: 443
+    uuid: b0e80a62-8a51-47f0-91f1-f0f7faf8d9d4
+    cipher: auto
+    tls: true
+    mux:
+      enabled: true
+      max-connections: 2
+      min-streams: 3
+      max-streams: 16
+      padding: true
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - VMess Mux
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("h2mux:"));
+        assert!(shoes_config.contains("max_connections: 2"));
+        assert!(shoes_config.contains("min_streams: 3"));
+        assert!(shoes_config.contains("max_streams: 16"));
+        assert!(shoes_config.contains("padding: true"));
+    }
+
+    #[test]
+    fn honors_udp_disabled_on_supported_proxy() {
+        let config = r#"
+proxies:
+  - { name: SS No UDP, type: ss, server: ss.example.com, port: 443, cipher: aes-128-gcm, password: secret, udp: false }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - SS No UDP
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("udp_enabled: false"));
     }
 
     #[test]
@@ -2211,6 +2358,22 @@ proxy-groups:
         let (proxies, groups, rules) = parse_clash_config(config);
         let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
         assert!(error.contains("network grpc is not supported"));
+    }
+
+    #[test]
+    fn rejects_unsupported_h2_transport_instead_of_mapping_to_h2mux() {
+        let config = r#"
+proxies:
+  - { name: VLESS H2, type: vless, server: h2.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: h2 }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - VLESS H2
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
+        assert!(error.contains("network h2 is not supported"));
     }
 
     #[test]
