@@ -1,6 +1,25 @@
 import { getClashService, IClashService } from '../services/ClashService';
-import { LogEntry } from '../models/LogEntry';
+import { ConnectState } from '../models/ClashConfig';
+import { LogEntry, LogType } from '../models/LogEntry';
 import { LogItem, LogItemModel } from '../components/LogItem';
+import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
+import { common } from '@kit.AbilityKit';
+
+interface ExtensionConnectionInfo {
+  id: string;
+  host: string;
+  destinationIP: string;
+  destinationPort: number;
+  sourceIP: string;
+  sourcePort: number;
+  network: string;
+  type: string;
+  rule: string;
+  rulePayload: string;
+  proxyChain: string[];
+  uploadBytes: number;
+  downloadBytes: number;
+}
 
 @Entry
 @Component
@@ -26,11 +45,11 @@ struct LogPage {
     this.stopPolling();
   }
 
-  private loadLogs(): void {
+  private async loadLogs(): Promise<void> {
     if (!this.service) {
       return;
     }
-    const rawLogs = this.service.getConnections();
+    const rawLogs = await this.getConnectionLogs();
     let filtered = rawLogs;
     if (this.filterText.length > 0) {
       const keyword = this.filterText.toLowerCase();
@@ -41,6 +60,59 @@ struct LogPage {
       );
     }
     this.logs = filtered.map((l: LogEntry) => LogItemModel.fromLogEntry(l));
+  }
+
+  private async getConnectionLogs(): Promise<LogEntry[]> {
+    if (!this.service) {
+      return [];
+    }
+    if (this.service.getState() === ConnectState.CONNECTED) {
+      try {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        const result = await new NativeCoreExtensionService(context).getConnections();
+        if (result.ok && result.data) {
+          const conns = JSON.parse(result.data) as ExtensionConnectionInfo[];
+          return conns.map((conn: ExtensionConnectionInfo): LogEntry => {
+            return {
+              id: conn.id,
+              timestamp: Date.now(),
+              type: this.mapLogType(conn.network),
+              network: conn.network,
+              sourceIP: conn.sourceIP,
+              sourcePort: conn.sourcePort,
+              destinationIP: conn.destinationIP,
+              destinationPort: conn.destinationPort,
+              host: conn.host,
+              rule: conn.rule,
+              rulePayload: conn.rulePayload,
+              proxyChain: conn.proxyChain || [],
+              downloadBytes: conn.downloadBytes,
+              uploadBytes: conn.uploadBytes,
+            };
+          });
+        }
+      } catch (_e) {
+        // Fall back to the local preview service below.
+      }
+    }
+    return this.service.getConnections();
+  }
+
+  private mapLogType(network: string): LogType {
+    const upper = network.toUpperCase();
+    if (upper === 'UDP') {
+      return LogType.UDP;
+    }
+    if (upper === 'DNS') {
+      return LogType.DNS;
+    }
+    if (upper === 'HTTP') {
+      return LogType.HTTP;
+    }
+    if (upper === 'HTTPS') {
+      return LogType.HTTPS;
+    }
+    return LogType.TCP;
   }
 
   private startPolling(): void {
@@ -60,7 +132,9 @@ struct LogPage {
 
   private async clearConnections(): Promise<void> {
     if (this.service) {
-      await this.service.closeAllConnections();
+      if (this.service.getState() !== ConnectState.CONNECTED) {
+        await this.service.closeAllConnections();
+      }
       this.logs = [];
     }
   }

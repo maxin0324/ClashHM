@@ -1,0 +1,8 @@
+[target.aarch64-unknown-linux-ohos]
+linker = "/path/to/openharmony/native/llvm/bin/clang"
+ar = "/path/to/openharmony/native/llvm/bin/llvm-ar"
+rustflags = [
+  "-C", "link-arg=--target=aarch64-linux-ohos",
+  "-C", "link-arg=--sysroot=/path/to/openharmony/native/sysroot"
+]
+

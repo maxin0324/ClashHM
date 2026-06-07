@@ -1,0 +1,26 @@
+[package]
+name = "clashhm-native-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "clashhm_native_core"
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = []
+shoes-backend = ["dep:shoes", "dep:sha3", "dep:tokio"]
+
+[dependencies]
+# shoes 0.2.8 still imports sha3::Shake128, which was moved out in sha3 0.12.
+sha3 = { version = "=0.11.0", optional = true }
+shoes = { path = "vendor/shoes", default-features = false, optional = true }
+serde_yaml = "0.9"
+tokio = { version = "*", features = ["rt-multi-thread", "sync"], optional = true }
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true

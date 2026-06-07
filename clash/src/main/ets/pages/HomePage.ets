@@ -7,13 +7,19 @@ import { TrafficMonitor } from '../services/TrafficMonitor';
 import { SubscriptionService } from '../services/SubscriptionService';
 import { ConfigManager } from '../services/ConfigManager';
 import { ProxySelectionService } from '../services/ProxySelectionService';
-import { Constants } from '../common/Constants';
+import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
 import { vpnExtension } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard, commonEventManager } from '@kit.BasicServicesKit';
 
 import { Logger } from '../common/Logger';
+
+class NativeCoreStatusInfo {
+  running: boolean = false;
+  engine: string = '';
+  status: string = '';
+}
 
 @Component
 export struct HomePage {
@@ -39,6 +45,7 @@ export struct HomePage {
       // service not ready
     }
     this.refreshProfileSummary();
+    this.refreshExtensionConnectionState();
     this.subscribeProxySelectionChanged();
     this.trafficMonitor.setCallback((data: TrafficData) => {
       this.traffic = data;
@@ -115,14 +122,12 @@ export struct HomePage {
         // Start VPN Extension
         const vpnStatusPath = `${context.filesDir}/vpn-engine-status.txt`;
         const vpnStartConfigPath = `${context.filesDir}/vpn-start-config.txt`;
-        const configText = this.readTextFile(activeSub.filePath);
-        if (!configText) {
-          throw new Error(`Failed to read active subscription config: ${activeSub.filePath}`);
-        }
-        await this.ensureUiCoreStarted(context);
         await this.stopVpnExtension(context);
 
-        const vpnTun2SocksConfig = this.createLocalTun2SocksConfig(Constants.DEFAULT_MIXED_PORT);
+        const nativeCoreConfig = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
+        if (!nativeCoreConfig) {
+          throw new Error(`Failed to read active subscription config: ${activeSub.filePath}`);
+        }
         const configSession = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
         const vpnStatusEvent = `com.mx.clashhm.VPN_STATUS_${configSession}`;
         const vpnStatusMessages: string[] = [];
@@ -141,9 +146,9 @@ export struct HomePage {
           }
         });
         const chunkSize = 30000;
-        const chunkCount = Math.ceil(vpnTun2SocksConfig.length / chunkSize);
+        const coreChunkCount = Math.ceil(nativeCoreConfig.length / chunkSize);
         this.writeTextFile(vpnStartConfigPath, activeSub.filePath);
-        this.writeTextFile(vpnStatusPath, `${new Date().toISOString()} ui starting vpn extension config=${activeSub.filePath} tunChunks=${chunkCount}`);
+        this.writeTextFile(vpnStatusPath, `${new Date().toISOString()} ui starting vpn extension config=${activeSub.filePath} nativeCoreChunks=${coreChunkCount}`);
         try {
           const want: Want = {
             deviceId: '',
@@ -156,20 +161,24 @@ export struct HomePage {
               statusEvent: vpnStatusEvent,
               startConfigPath: vpnStartConfigPath,
               configSession,
-              configChunkCount: chunkCount,
+              configChunkCount: 0,
+              coreConfigChunkCount: coreChunkCount,
             },
           };
           await vpnExtension.startVpnExtensionAbility(want);
           this.writeConnectionStatus(vpnStatusPath, 'ui startVpnExtensionAbility returned');
           await this.waitForVpnStatus(vpnStatusMessages, 'config subscriber ready', 5000);
-          for (let i = 0; i < chunkCount; i++) {
-            const chunk = vpnTun2SocksConfig.substring(i * chunkSize, Math.min(vpnTun2SocksConfig.length, (i + 1) * chunkSize));
-            await this.publishConfigChunk(context.abilityInfo.bundleName, configSession, i, chunkCount, chunk, 'tun');
-            this.writeConnectionStatus(vpnStatusPath, `ui config chunk published ${i + 1}/${chunkCount}`);
+          for (let i = 0; i < coreChunkCount; i++) {
+            const chunk = nativeCoreConfig.substring(i * chunkSize, Math.min(nativeCoreConfig.length, (i + 1) * chunkSize));
+            await this.publishConfigChunk(context.abilityInfo.bundleName, configSession, i, coreChunkCount, chunk, 'core');
+            this.writeConnectionStatus(vpnStatusPath, `ui core config chunk published ${i + 1}/${coreChunkCount}`);
           }
           Logger.info('VPN Extension started and config chunks published');
-          this.writeConnectionStatus(vpnStatusPath, 'ui config chunks published');
+          this.writeConnectionStatus(vpnStatusPath, 'ui native-core config chunks published');
           await this.waitForVpnStartResult(vpnStatusMessages, 15000);
+          if (this.hasNativeCoreStarted(vpnStatusMessages)) {
+            await this.applySavedProxySelectionsToExtension(context);
+          }
         } catch (e) {
           const startError = this.describeError(e);
           this.writeConnectionStatus(vpnStatusPath, `ui startVpnExtensionAbility failed: ${startError}`);
@@ -190,9 +199,6 @@ export struct HomePage {
         if (this.service) {
           this.service.setVpnConnected(false);
         }
-        if (context && this.service) {
-          await this.ensureUiCoreStarted(context);
-        }
         const errorText = this.describeError(e);
         this.errorMsg = `Connection failed: ${errorText}`;
         Logger.error('Connection failed: %{public}s', errorText);
@@ -207,7 +213,6 @@ export struct HomePage {
       }
 
       this.service.setVpnConnected(false);
-      await this.ensureUiCoreStarted(this.getUIContext().getHostContext() as common.UIAbilityContext);
       this.trafficMonitor.stop();
       this.traffic = createEmptyTraffic();
       this.connectState = this.service.getState();
@@ -233,7 +238,9 @@ export struct HomePage {
       const selectionService = new ProxySelectionService();
       await selectionService.init(context);
       const selections = selectionService.getSelections();
-      const groups = new ConfigManager(context).parseProxyGroupsFromFile(activeSub.filePath);
+      const configManager = new ConfigManager(context);
+      const mergedConfig = configManager.generateMergedConfig(activeSub.filePath);
+      const groups = configManager.parseProxyGroupsFromContent(mergedConfig);
       let selectedGroup = '';
       let selectedProxy = '';
 
@@ -268,6 +275,27 @@ export struct HomePage {
     }
   }
 
+  private async refreshExtensionConnectionState(): Promise<void> {
+    if (!this.service) {
+      return;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const result = await new NativeCoreExtensionService(context).getStatus();
+      if (!result.ok || !result.data) {
+        return;
+      }
+      const status = JSON.parse(result.data) as NativeCoreStatusInfo;
+      if (status.running) {
+        this.service.setVpnConnected(true);
+        this.connectState = this.service.getState();
+        this.trafficMonitor.start();
+      }
+    } catch (e) {
+      Logger.info('VPN Extension status unavailable on page appear: %{public}s', this.describeError(e));
+    }
+  }
+
   private pickPrimaryProxyGroup(groups: ProxyGroup[]): ProxyGroup | null {
     let best: ProxyGroup | null = null;
     let bestScore = -1;
@@ -294,42 +322,19 @@ export struct HomePage {
       name.indexOf('选择') >= 0;
   }
 
-  private async applySavedProxySelections(context: common.UIAbilityContext): Promise<void> {
-    if (!this.service) {
-      return;
-    }
+  private async applySavedProxySelectionsToExtension(context: common.UIAbilityContext): Promise<void> {
     try {
       const selectionService = new ProxySelectionService();
       await selectionService.init(context);
       const selections = selectionService.getSelections();
+      const extensionService = new NativeCoreExtensionService(context);
       for (const selection of selections) {
         if (selection.groupName && selection.proxyName) {
-          await this.service.selectProxy(selection.groupName, selection.proxyName);
+          await extensionService.selectProxy(selection.groupName, selection.proxyName);
         }
       }
     } catch (e) {
-      Logger.error('Failed to apply saved proxy selections: %{public}s', String(e));
-    }
-  }
-
-  private async ensureUiCoreStarted(context: common.UIAbilityContext): Promise<void> {
-    if (!this.service || this.service.isCoreRunning()) {
-      return;
-    }
-    try {
-      const subService = new SubscriptionService(context);
-      await subService.init();
-      const activeSub = subService.getActiveSubscription();
-      if (!activeSub || !activeSub.filePath) {
-        return;
-      }
-      const configPath = `${context.filesDir}/app-core-config.yaml`;
-      const configText = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
-      this.writeTextFile(configPath, configText);
-      await this.service.startCore(configPath);
-      await this.applySavedProxySelections(context);
-    } catch (e) {
-      Logger.error('Failed to restart UI core: %{public}s', String(e));
+      Logger.error('Failed to apply extension proxy selections: %{public}s', String(e));
     }
   }
 
@@ -415,7 +420,9 @@ export struct HomePage {
           continue;
         }
         const result = message.substring(resultIndex).trim();
-        if (result.indexOf('start result: started') >= 0 || result.indexOf('start result: already_running') >= 0) {
+        if (result.indexOf('start result: started') >= 0 ||
+          result.indexOf('start result: already_running') >= 0 ||
+          result.indexOf('start result: native_core_started') >= 0) {
           return;
         }
         throw new Error(result);
@@ -426,26 +433,13 @@ export struct HomePage {
     throw new Error(`VPN Extension did not report start result within ${timeoutMs}ms; recentVpnStatus=\n${recent}`);
   }
 
-  private createLocalTun2SocksConfig(port: number): string {
-    return `tunnel:
-  name: vpn-tun
-  mtu: 1400
-  multi-queue: false
-  ipv4: 10.249.0.1
-
-socks5:
-  address: '127.0.0.1'
-  port: ${port}
-  udp: 'udp'
-
-misc:
-  task-stack-size: 24576
-  tcp-buffer-size: 4096
-  connect-timeout: 10000
-  tcp-read-write-timeout: 300000
-  udp-read-write-timeout: 60000
-  log-level: warn
-`;
+  private hasNativeCoreStarted(messages: string[]): boolean {
+    for (const message of messages) {
+      if (message.indexOf('start result: native_core_started') >= 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private describeError(error: Object | string): string {

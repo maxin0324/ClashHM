@@ -115,7 +115,7 @@ export struct SettingsPage {
         }
 
         ListItem() {
-          this.valueItem('Core', 'mihomo v1.19.26')
+          this.valueItem('Core', 'Extension native-core')
         }
 
         ListItem() {

@@ -10,38 +10,46 @@ function getNativeModule(): ClashNativeModule {
   return clashNapi;
 }
 
-export function callLoadEngine(libDir: string): string {
-  return getNativeModule().loadEngine(libDir);
+export function callNativeCoreInit(homeDir: string): number {
+  return getNativeModule().nativeCoreInit(homeDir);
 }
 
-export function callInit(homeDir: string): string {
-  return getNativeModule().init(homeDir);
+export function callNativeCoreStartTun(tunFd: number, configText: string): number {
+  return getNativeModule().nativeCoreStartTun(tunFd, configText);
 }
 
-export function callStartContent(configText: string): string {
-  return getNativeModule().startContent(configText);
+export function callNativeCoreStop(): number {
+  return getNativeModule().nativeCoreStop();
 }
 
-export function callStop(): void {
-  getNativeModule().stop();
+export function callNativeCoreIsRunning(): number {
+  return getNativeModule().nativeCoreIsRunning();
 }
 
-export function callSelectProxy(groupName: string, proxyName: string): number {
-  return getNativeModule().selectProxy(groupName, proxyName);
+export function callNativeCoreGetProxies(): string {
+  return getNativeModule().nativeCoreGetProxies();
 }
 
-export function callSetTunFd(fd: number): void {
-  getNativeModule().setTunFd(fd);
+export function callNativeCoreParseProxies(configText: string): string {
+  return getNativeModule().nativeCoreParseProxies(configText);
 }
 
-export function callStartTun2SocksContent(configText: string, tunFd: number): string {
-  return getNativeModule().startTun2SocksContent(configText, tunFd);
+export function callNativeCoreSelectProxy(groupName: string, proxyName: string): number {
+  return getNativeModule().nativeCoreSelectProxy(groupName, proxyName);
 }
 
-export function callStopTun2Socks(): void {
-  getNativeModule().stopTun2Socks();
+export function callNativeCoreTestDelay(proxyName: string, url: string, timeout: number): number {
+  return getNativeModule().nativeCoreTestDelay(proxyName, url, timeout);
 }
 
-export function callGetTun2SocksStatus(): string {
-  return getNativeModule().getTun2SocksStatus();
+export function callNativeCoreGetTraffic(): string {
+  return getNativeModule().nativeCoreGetTraffic();
+}
+
+export function callNativeCoreGetConnections(): string {
+  return getNativeModule().nativeCoreGetConnections();
+}
+
+export function callNativeCoreGetStatus(): string {
+  return getNativeModule().nativeCoreGetStatus();
 }

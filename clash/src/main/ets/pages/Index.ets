@@ -4,12 +4,8 @@ import { SubscriptionPage } from './SubscriptionPage';
 import { SettingsPage } from './SettingsPage';
 import { NapiClashService } from '../services/NapiClashService';
 import { MockClashService } from '../services/MockClashService';
-import { IClashService, setClashService } from '../services/ClashService';
-import { ConfigManager } from '../services/ConfigManager';
-import { ProxySelectionService } from '../services/ProxySelectionService';
-import { SubscriptionService } from '../services/SubscriptionService';
+import { setClashService } from '../services/ClashService';
 import { common } from '@kit.AbilityKit';
-import { fileIo } from '@kit.CoreFileKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { Logger } from '../common/Logger';
 
@@ -30,9 +26,8 @@ struct Index {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const service = new NapiClashService(context);
       setClashService(service);
-      this.engineMode = 'mihomo-core+vpn-tun2socks';
-      Logger.info('Using NapiClashService with VPN Extension tun2socks');
-      this.startCoreOnLaunch(context, service);
+      this.engineMode = 'native-extension-core';
+      Logger.info('Using Extension native-core service bridge');
     } catch (e) {
       const errMsg = (e instanceof Error) ? e.message : String(e);
       Logger.error('NapiClashService failed: %{public}s', errMsg);
@@ -40,59 +35,6 @@ struct Index {
       const mockService = new MockClashService();
       setClashService(mockService);
       this.engineMode = 'mock';
-    }
-  }
-
-  private async startCoreOnLaunch(context: common.UIAbilityContext, service: IClashService): Promise<void> {
-    try {
-      const subService = new SubscriptionService(context);
-      await subService.init();
-      const activeSub = subService.getActiveSubscription();
-      if (!activeSub || !activeSub.filePath) {
-        Logger.info('Skip core startup: no active subscription');
-        return;
-      }
-      let configExists = false;
-      try {
-        configExists = fileIo.accessSync(activeSub.filePath);
-      } catch (_e) {
-        configExists = false;
-      }
-      if (!configExists) {
-        await subService.updateSubscription(activeSub.id);
-      }
-
-      const configPath = `${context.filesDir}/app-core-config.yaml`;
-      const configText = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
-      this.writeTextFile(configPath, configText);
-      await service.startCore(configPath);
-      await this.applySavedProxySelections(context, service);
-      Logger.info('Core started on app launch');
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : String(e);
-      Logger.error('Core startup failed: %{public}s', errMsg);
-      this.errorDetail = errMsg;
-    }
-  }
-
-  private async applySavedProxySelections(context: common.UIAbilityContext, service: IClashService): Promise<void> {
-    const selectionService = new ProxySelectionService();
-    await selectionService.init(context);
-    const selections = selectionService.getSelections();
-    for (const selection of selections) {
-      if (selection.groupName && selection.proxyName) {
-        await service.selectProxy(selection.groupName, selection.proxyName);
-      }
-    }
-  }
-
-  private writeTextFile(path: string, text: string): void {
-    try {
-      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, text);
-      fileIo.closeSync(file);
-    } catch (e) {
-      Logger.error('Failed to write app core config: %{public}s', String(e));
     }
   }
 

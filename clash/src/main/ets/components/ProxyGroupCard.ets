@@ -78,8 +78,7 @@ export struct ProxyGroupCard {
           })
         }, (node: ProxyNodeModel) => node.name)
 
-        // Built-in options
-        ForEach(this.getBuiltinOptions(), (name: string) => {
+        ForEach(this.getAdditionalOptions(), (name: string) => {
           Row() {
             Radio({ value: name, group: this.group.name })
               .checked(name === this.group.now)
@@ -121,10 +120,11 @@ export struct ProxyGroupCard {
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
-  private getBuiltinOptions(): string[] {
+  private getAdditionalOptions(): string[] {
     let result: string[] = [];
+    const nodeNames: string[] = this.group.nodes.map((node: ProxyNodeModel) => node.name);
     for (const name of this.group.all) {
-      if (name === 'DIRECT' || name === 'REJECT' || name === 'Proxy' || name === 'Auto') {
+      if (nodeNames.indexOf(name) < 0) {
         result.push(name);
       }
     }

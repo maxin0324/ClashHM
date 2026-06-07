@@ -6,6 +6,13 @@ import { Constants } from '../common/Constants';
 import { Logger } from '../common/Logger';
 import { common } from '@kit.AbilityKit';
 
+class ProviderFetchConfig {
+  name: string = '';
+  section: string = '';
+  url: string = '';
+  path: string = '';
+}
+
 export class SubscriptionService {
   private context: common.UIAbilityContext;
   private store: preferences.Preferences | null = null;
@@ -146,6 +153,7 @@ export class SubscriptionService {
           return;
         }
         content = this.normalizeSubscriptionContent(content);
+        content = await this.materializeRemoteProviders(sub, content);
         Logger.info('fetch step 4: content length %{public}s', String(content.length));
 
         Logger.info('fetch step 5: writing to file %{public}s', sub.filePath);
@@ -187,6 +195,220 @@ export class SubscriptionService {
         }
       }
     }
+  }
+
+  private async materializeRemoteProviders(sub: Subscription, content: string): Promise<string> {
+    const providers = this.parseProviderFetchConfigs(content);
+    if (providers.length === 0) {
+      return content;
+    }
+
+    const configDir = sub.filePath.substring(0, sub.filePath.lastIndexOf('/'));
+    const providerDir = `${configDir}/providers`;
+    try {
+      fileIo.mkdirSync(providerDir, true);
+    } catch (_e) {
+      // directory may exist
+    }
+
+    const proxyLocalPaths: Map<string, string> = new Map();
+    const ruleLocalPaths: Map<string, string> = new Map();
+    for (const provider of providers) {
+      if (!provider.url) {
+        continue;
+      }
+      try {
+        const prefix = provider.section === 'rule-providers' ? 'rule' : 'proxy';
+        const localPath = `${providerDir}/${sub.id}_${prefix}_${this.safeFileName(provider.name)}.yaml`;
+        const providerContent = await this.fetchProviderContent(provider.url);
+        this.writeTextFile(localPath, providerContent);
+        if (provider.section === 'rule-providers') {
+          ruleLocalPaths.set(provider.name, localPath);
+        } else {
+          proxyLocalPaths.set(provider.name, localPath);
+        }
+        Logger.info('provider %{public}s saved to %{public}s', provider.name, localPath);
+      } catch (e) {
+        Logger.error('Failed to fetch provider %{public}s: %{public}s', provider.name, String(e));
+      }
+    }
+
+    if (proxyLocalPaths.size === 0 && ruleLocalPaths.size === 0) {
+      return content;
+    }
+    let rewritten = content;
+    if (proxyLocalPaths.size > 0) {
+      rewritten = this.rewriteProviderPaths(rewritten, 'proxy-providers', proxyLocalPaths);
+    }
+    if (ruleLocalPaths.size > 0) {
+      rewritten = this.rewriteProviderPaths(rewritten, 'rule-providers', ruleLocalPaths);
+    }
+    return rewritten;
+  }
+
+  private async fetchProviderContent(url: string): Promise<string> {
+    const httpRequest = http.createHttp();
+    try {
+      const response = await httpRequest.request(url, {
+        method: http.RequestMethod.GET,
+        header: {
+          'User-Agent': 'clash-verge/v2.2.0',
+        },
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 15000,
+        readTimeout: 30000,
+      });
+      const code: number = response.responseCode;
+      if (code < 200 || code >= 400) {
+        throw new Error(`provider response code ${code}`);
+      }
+      const text = response.result as string;
+      if (!text || text.length === 0) {
+        throw new Error('empty provider response');
+      }
+      return this.normalizeSubscriptionContent(text);
+    } catch (e) {
+      throw new Error(`provider fetch failed: ${String(e)}`);
+    } finally {
+      httpRequest.destroy();
+    }
+  }
+
+  private parseProviderFetchConfigs(content: string): ProviderFetchConfig[] {
+    const providers: ProviderFetchConfig[] = [];
+    const lines = content.split('\n');
+    let section = '';
+    let current: ProviderFetchConfig | null = null;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue;
+      }
+      const isTopLevel = line.length > 0 && line[0] !== ' ' && line[0] !== '\t' && !line.startsWith('-');
+      if (isTopLevel) {
+        if (current) {
+          providers.push(current);
+          current = null;
+        }
+        if (trimmed === 'proxy-providers:') {
+          section = 'proxy-providers';
+        } else if (trimmed === 'rule-providers:') {
+          section = 'rule-providers';
+        } else {
+          section = '';
+        }
+        continue;
+      }
+      if (section !== 'proxy-providers' && section !== 'rule-providers') {
+        continue;
+      }
+      if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
+        if (current) {
+          providers.push(current);
+        }
+        current = new ProviderFetchConfig();
+        current.section = section;
+        current.name = this.stripQuotes(trimmed.substring(0, trimmed.length - 1));
+      } else if (current && trimmed.startsWith('url:')) {
+        current.url = this.stripQuotes(trimmed.substring(4).trim());
+      } else if (current && trimmed.startsWith('path:')) {
+        current.path = this.stripQuotes(trimmed.substring(5).trim());
+      }
+    }
+    if (current) {
+      providers.push(current);
+    }
+    return providers.filter((provider: ProviderFetchConfig) => provider.name.length > 0 && provider.url.length > 0);
+  }
+
+  private rewriteProviderPaths(content: string, targetSection: string, localPaths: Map<string, string>): string {
+    const lines = content.split('\n');
+    const output: string[] = [];
+    let section = '';
+    let currentProvider = '';
+    let currentLocalPath = '';
+    let pathWritten = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const isTopLevel = line.length > 0 && line[0] !== ' ' && line[0] !== '\t' && !line.startsWith('-');
+      if (isTopLevel) {
+        if (currentLocalPath && !pathWritten) {
+          output.push(`    path: ${currentLocalPath}`);
+        }
+        currentProvider = '';
+        currentLocalPath = '';
+        pathWritten = false;
+        section = trimmed === `${targetSection}:` ? targetSection : '';
+        output.push(line);
+        continue;
+      }
+      if (section === targetSection && line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
+        if (currentLocalPath && !pathWritten) {
+          output.push(`    path: ${currentLocalPath}`);
+        }
+        currentProvider = this.stripQuotes(trimmed.substring(0, trimmed.length - 1));
+        currentLocalPath = localPaths.get(currentProvider) || '';
+        pathWritten = false;
+        output.push(line);
+        continue;
+      }
+      if (section === targetSection && currentLocalPath && trimmed.startsWith('path:')) {
+        output.push(`    path: ${currentLocalPath}`);
+        pathWritten = true;
+        continue;
+      }
+      output.push(line);
+    }
+    if (currentLocalPath && !pathWritten) {
+      output.push(`    path: ${currentLocalPath}`);
+    }
+    return output.join('\n');
+  }
+
+  private writeTextFile(filePath: string, content: string): void {
+    let file: fileIo.File | null = null;
+    try {
+      file = fileIo.openSync(filePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, content);
+    } catch (e) {
+      throw new Error(`write file failed: ${String(e)}`);
+    } finally {
+      if (file !== null) {
+        try {
+          fileIo.closeSync(file);
+        } catch (_e) {
+        }
+      }
+    }
+  }
+
+  private safeFileName(value: string): string {
+    let output = '';
+    for (let i = 0; i < value.length; i++) {
+      const ch = value.charAt(i);
+      const code = value.charCodeAt(i);
+      const isDigit = code >= 48 && code <= 57;
+      const isUpper = code >= 65 && code <= 90;
+      const isLower = code >= 97 && code <= 122;
+      if (isDigit || isUpper || isLower || ch === '-' || ch === '_') {
+        output += ch;
+      } else {
+        output += '_';
+      }
+    }
+    return output || 'provider';
+  }
+
+  private stripQuotes(text: string): string {
+    let value = text.trim();
+    if (value.length >= 2) {
+      const first = value.charAt(0);
+      const last = value.charAt(value.length - 1);
+      if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+        value = value.substring(1, value.length - 1);
+      }
+    }
+    return value;
   }
 
   private countNodes(sub: Subscription, content: string): void {

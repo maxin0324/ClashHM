@@ -1,82 +1,239 @@
 import { getClashService, IClashService } from '../services/ClashService';
-import { ProxyGroup } from '../models/ClashConfig';
+import { ConnectState, ProxyGroup, ProxyNode } from '../models/ClashConfig';
 import { ProxyGroupCard, ProxyGroupModel } from '../components/ProxyGroupCard';
 import { SubscriptionService } from '../services/SubscriptionService';
 import { ConfigManager } from '../services/ConfigManager';
 import { ProxySelectionService } from '../services/ProxySelectionService';
+import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
+import { callNativeCoreParseProxies } from '../services/NativeClash';
 import { common } from '@kit.AbilityKit';
 import { commonEventManager } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { Logger } from '../common/Logger';
+
+interface ExtensionProxyNode {
+  name?: string;
+  type?: string;
+  alive?: boolean;
+  latency?: number;
+}
+
+interface ExtensionProxyGroup {
+  name?: string;
+  type?: string;
+  now?: string;
+  all?: string[];
+  nodes?: ExtensionProxyNode[];
+}
+
+class ProxyLoadResult {
+  groups: ProxyGroup[] = [];
+  source: string = '';
+  detail: string = '';
+  fromExtension: boolean = false;
+}
 
 @Component
 export struct ProxyPage {
   @State groups: ProxyGroupModel[] = [];
   @State statusMsg: string = '';
   @State sourceMsg: string = '';
+  @State diagnosticMsg: string = '';
   @State testingGroup: string = '';
   private service: IClashService | null = null;
   private selectionService: ProxySelectionService | null = null;
+  private loadedFromExtension: boolean = false;
 
   aboutToAppear(): void {
     try {
       this.service = getClashService();
-      this.loadProxyGroups();
-    } catch (_e) {
-      this.statusMsg = 'Service not ready';
+    } catch (e) {
+      this.service = null;
+      Logger.info('Clash service not ready on Proxy page appear: %{public}s', String(e));
     }
+    this.loadProxyGroups();
   }
 
   private async loadProxyGroups(): Promise<void> {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.statusMsg = '';
+      this.sourceMsg = '';
+      this.diagnosticMsg = '';
+      this.loadedFromExtension = false;
       this.selectionService = new ProxySelectionService();
       await this.selectionService.init(context);
 
-      if (this.service) {
-        try {
-          await this.ensureCoreForProxy();
-          const rawGroups = await this.service.getProxyGroupsAsync();
-          if (rawGroups.length > 0) {
-            this.groups = rawGroups.map((g: ProxyGroup) => new ProxyGroupModel(g));
-            this.applySavedSelections();
-            this.statusMsg = '';
-            this.sourceMsg = 'Live from mihomo';
-            this.expandLargestGroup();
-            return;
-          }
-        } catch (e) {
-          Logger.error('Load live proxy groups failed: %{public}s', String(e));
-        }
-      }
-
-      {
-        const subService = new SubscriptionService(context);
-        await subService.init();
-        const activeSub = subService.getActiveSubscription();
-        if (!activeSub || !activeSub.filePath) {
-          this.statusMsg = 'No active subscription. Add one first.';
-          this.sourceMsg = '';
-          this.groups = [];
-          return;
-        }
-        const configManager = new ConfigManager(context);
-        const rawGroups = configManager.parseProxyGroupsFromFile(activeSub.filePath);
-        this.groups = rawGroups.map((g: ProxyGroup) => new ProxyGroupModel(g));
+      const result = await this.loadProxyGroupsFromSources(context);
+      if (result.groups.length > 0) {
+        this.groups = result.groups.map((g: ProxyGroup) => new ProxyGroupModel(g));
         this.applySavedSelections();
-        this.statusMsg = this.groups.length === 0 ? 'No proxy groups found in the active subscription.' : '';
-        this.sourceMsg = activeSub.name;
+        this.statusMsg = '';
+        this.sourceMsg = result.source;
+        this.diagnosticMsg = result.detail;
+        this.loadedFromExtension = result.fromExtension;
+        this.expandLargestGroup();
+        return;
       }
 
-      this.expandLargestGroup();
-      if (this.groups.length === 0 && !this.statusMsg) {
-        this.statusMsg = 'No proxy groups found. Update the active subscription, then refresh.';
-      }
+      this.groups = [];
+      this.statusMsg = 'No proxy groups found. Update the active subscription, then refresh.';
+      this.sourceMsg = '';
+      this.diagnosticMsg = result.detail;
     } catch (e) {
       this.statusMsg = `Failed to load proxy groups: ${String(e)}`;
       this.sourceMsg = '';
+      this.diagnosticMsg = '';
       this.groups = [];
+      this.loadedFromExtension = false;
     }
+  }
+
+  private async loadProxyGroupsFromSources(context: common.UIAbilityContext): Promise<ProxyLoadResult> {
+    const loadResult = new ProxyLoadResult();
+    const details: string[] = [];
+
+    const connected = this.service !== null && this.service.getState() === ConnectState.CONNECTED;
+    if (connected) {
+      const extensionGroups = await this.loadProxyGroupsFromExtension(context, details);
+      if (extensionGroups.length > 0) {
+        loadResult.groups = extensionGroups;
+        loadResult.source = 'VPN Extension';
+        loadResult.detail = details.join('\n');
+        loadResult.fromExtension = true;
+        return loadResult;
+      }
+    } else {
+      details.push('extension: skipped while disconnected');
+    }
+
+    const localGroups = await this.loadProxyGroupsFromActiveSubscription(context, details);
+    if (localGroups.groups.length > 0) {
+      return localGroups;
+    }
+
+    loadResult.detail = details.join('\n');
+    return loadResult;
+  }
+
+  private async loadProxyGroupsFromActiveSubscription(context: common.UIAbilityContext, details: string[]): Promise<ProxyLoadResult> {
+    const loadResult = new ProxyLoadResult();
+    const subService = new SubscriptionService(context);
+    await subService.init();
+    const activeSub = subService.getActiveSubscription();
+    if (!activeSub || !activeSub.filePath) {
+      details.push('subscription: none');
+      return loadResult;
+    }
+
+    const configManager = new ConfigManager(context);
+    const mergedConfig = configManager.generateMergedConfig(activeSub.filePath);
+    let mergedGroups = this.parseProxyGroupsWithNativeCore(mergedConfig, details);
+    if (mergedGroups.length === 0) {
+      mergedGroups = configManager.parseProxyGroupsFromContent(mergedConfig);
+    }
+    details.push(`merged config: ${mergedGroups.length} groups, ${this.countProxyOptions(mergedGroups)} options`);
+    if (mergedGroups.length > 0) {
+      loadResult.groups = mergedGroups;
+      loadResult.source = `${activeSub.name} · merged config`;
+      loadResult.detail = details.join('\n');
+      return loadResult;
+    }
+
+    const rawConfig = this.readTextFile(activeSub.filePath);
+    let rawGroups = this.parseProxyGroupsWithNativeCore(rawConfig, details);
+    if (rawGroups.length === 0) {
+      rawGroups = configManager.parseProxyGroupsFromContent(rawConfig);
+    }
+    details.push(`raw subscription: ${rawGroups.length} groups, ${this.countProxyOptions(rawGroups)} options`);
+    if (rawGroups.length > 0) {
+      loadResult.groups = rawGroups;
+      loadResult.source = `${activeSub.name} · raw config`;
+      loadResult.detail = details.join('\n');
+      return loadResult;
+    }
+
+    loadResult.detail = details.join('\n');
+    return loadResult;
+  }
+
+  private parseProxyGroupsWithNativeCore(configText: string, details: string[]): ProxyGroup[] {
+    if (!configText) {
+      return [];
+    }
+    try {
+      const data = callNativeCoreParseProxies(configText);
+      if (!data) {
+        details.push('native parser: empty');
+        return [];
+      }
+      const groups = JSON.parse(data) as ExtensionProxyGroup[];
+      const mapped = this.mapExtensionGroups(groups);
+      details.push(`native parser: ${mapped.length} groups, ${this.countProxyOptions(mapped)} options`);
+      return mapped;
+    } catch (e) {
+      details.push(`native parser: ${String(e)}`);
+      return [];
+    }
+  }
+
+  private async loadProxyGroupsFromExtension(context: common.UIAbilityContext, details: string[]): Promise<ProxyGroup[]> {
+    try {
+      const result = await new NativeCoreExtensionService(context).getProxies();
+      if (!result.ok || !result.data) {
+        details.push(`extension: unavailable ${result.error || result.data || ''}`);
+        return [];
+      }
+      const groups = JSON.parse(result.data) as ExtensionProxyGroup[];
+      const mapped = this.mapExtensionGroups(groups);
+      details.push(`extension: ${mapped.length} groups, ${this.countProxyOptions(mapped)} options`);
+      return mapped;
+    } catch (e) {
+      Logger.info('Proxy groups from VPN Extension unavailable: %{public}s', String(e));
+      details.push(`extension: ${String(e)}`);
+      return [];
+    }
+  }
+
+  private mapExtensionGroups(groups: ExtensionProxyGroup[]): ProxyGroup[] {
+    const mapped: ProxyGroup[] = [];
+    for (const group of groups) {
+      const groupName = group.name === undefined ? '' : group.name;
+      const groupType = group.type === undefined ? 'select' : group.type;
+      const groupAll = group.all === undefined ? [] : group.all;
+      const groupNodes = group.nodes === undefined ? [] : group.nodes;
+      if (!groupName || groupAll.length === 0) {
+        continue;
+      }
+      const mappedGroup: ProxyGroup = {
+        name: groupName,
+        type: groupType,
+        now: group.now === undefined || group.now === '' ? groupAll[0] : group.now,
+        all: groupAll,
+        nodes: groupNodes.map((node: ExtensionProxyNode): ProxyNode => {
+          const mappedNode: ProxyNode = {
+            name: node.name === undefined ? '' : node.name,
+            type: node.type === undefined || node.type === '' ? 'proxy' : node.type,
+            server: '',
+            port: 0,
+            latency: node.latency === undefined ? -1 : node.latency,
+            alive: node.alive === undefined ? true : node.alive,
+          };
+          return mappedNode;
+        }),
+        expanded: false,
+      };
+      mapped.push(mappedGroup);
+    }
+    return mapped;
+  }
+
+  private countProxyOptions(groups: ProxyGroup[]): number {
+    let count = 0;
+    for (const group of groups) {
+      count += group.all.length > 0 ? group.all.length : group.nodes.length;
+    }
+    return count;
   }
 
   private applySavedSelections(): void {
@@ -96,7 +253,7 @@ export struct ProxyPage {
     let maxCount = 0;
     for (let i = 0; i < this.groups.length; i++) {
       this.groups[i].expanded = false;
-      const count = this.groups[i].nodes.length;
+      const count = this.getGroupOptionCount(this.groups[i]);
       if (count > maxCount) {
         maxIndex = i;
         maxCount = count;
@@ -110,9 +267,13 @@ export struct ProxyPage {
   private getNodeCount(): number {
     let count = 0;
     for (const group of this.groups) {
-      count += group.nodes.length;
+      count += this.getGroupOptionCount(group);
     }
     return count;
+  }
+
+  private getGroupOptionCount(group: ProxyGroupModel): number {
+    return group.all.length > 0 ? group.all.length : group.nodes.length;
   }
 
   private async selectProxy(groupName: string, proxyName: string): Promise<void> {
@@ -125,8 +286,12 @@ export struct ProxyPage {
       if (this.selectionService) {
         await this.selectionService.saveSelection(groupName, proxyName);
       }
-      if (this.service && this.service.isCoreRunning()) {
-        await this.service.selectProxy(groupName, proxyName);
+      if (this.loadedFromExtension || (this.service && this.service.getState() === ConnectState.CONNECTED)) {
+        try {
+          await new NativeCoreExtensionService(context).selectProxy(groupName, proxyName);
+        } catch (e) {
+          Logger.error('Select proxy in VPN Extension failed: %{public}s', String(e));
+        }
       }
       for (const group of this.groups) {
         if (group.name === groupName) {
@@ -142,23 +307,22 @@ export struct ProxyPage {
   }
 
   private async testGroupLatency(groupName: string): Promise<void> {
-    if (!this.service) {
+    if (!this.loadedFromExtension) {
+      this.sourceMsg = 'Connect VPN to test latency';
       return;
     }
     this.testingGroup = groupName;
     try {
-      await this.ensureCoreForProxy();
-      const results = await this.service.testGroupLatency(groupName);
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const extensionService = new NativeCoreExtensionService(context);
       for (const group of this.groups) {
         if (group.name !== groupName) {
           continue;
         }
         for (const node of group.nodes) {
-          if (results.has(node.name)) {
-            const latency = results.get(node.name) as number;
-            node.latency = latency;
-            node.alive = latency > 0;
-          }
+          const delay = await extensionService.testDelay(node.name);
+          node.latency = delay.code;
+          node.alive = delay.ok && delay.code > 0;
         }
         break;
       }
@@ -168,32 +332,6 @@ export struct ProxyPage {
       Logger.error('Latency test failed: %{public}s', String(e));
     } finally {
       this.testingGroup = '';
-    }
-  }
-
-  private async ensureCoreForProxy(): Promise<void> {
-    if (!this.service || this.service.isCoreRunning()) {
-      return;
-    }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const subService = new SubscriptionService(context);
-    await subService.init();
-    const activeSub = subService.getActiveSubscription();
-    if (!activeSub || !activeSub.filePath) {
-      throw new Error('No active subscription. Add one first.');
-    }
-    const configPath = `${context.filesDir}/proxy-preview-core.yaml`;
-    const configText = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
-    this.writeTextFile(configPath, configText);
-    await this.service.startCore(configPath);
-
-    if (this.selectionService) {
-      const selections = this.selectionService.getSelections();
-      for (const selection of selections) {
-        if (selection.groupName && selection.proxyName) {
-          await this.service.selectProxy(selection.groupName, selection.proxyName);
-        }
-      }
     }
   }
 
@@ -209,14 +347,49 @@ export struct ProxyPage {
     });
   }
 
-  private writeTextFile(path: string, text: string): void {
+  private readTextFile(path: string): string {
     try {
-      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, text);
+      const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      const stat = fileIo.statSync(path);
+      const buffer = new ArrayBuffer(stat.size);
+      fileIo.readSync(file.fd, buffer);
       fileIo.closeSync(file);
+      const view = new Uint8Array(buffer);
+      const bytes: number[] = [];
+      for (let i = 0; i < view.length; i++) {
+        bytes.push(view[i]);
+      }
+      return this.decodeUtf8(bytes);
     } catch (e) {
-      Logger.error('Failed to write proxy preview config: %{public}s', String(e));
+      Logger.error('Failed to read proxy config: %{public}s', String(e));
+      return '';
     }
+  }
+
+  private decodeUtf8(bytes: number[]): string {
+    let result = '';
+    for (let i = 0; i < bytes.length; i++) {
+      const b0 = bytes[i];
+      if (b0 < 0x80) {
+        result += String.fromCharCode(b0);
+      } else if ((b0 & 0xe0) === 0xc0 && i + 1 < bytes.length) {
+        const b1 = bytes[++i];
+        result += String.fromCharCode(((b0 & 0x1f) << 6) | (b1 & 0x3f));
+      } else if ((b0 & 0xf0) === 0xe0 && i + 2 < bytes.length) {
+        const b1 = bytes[++i];
+        const b2 = bytes[++i];
+        result += String.fromCharCode(((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f));
+      } else if ((b0 & 0xf8) === 0xf0 && i + 3 < bytes.length) {
+        const b1 = bytes[++i];
+        const b2 = bytes[++i];
+        const b3 = bytes[++i];
+        let codePoint = ((b0 & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f);
+        codePoint -= 0x10000;
+        result += String.fromCharCode(0xd800 + (codePoint >> 10));
+        result += String.fromCharCode(0xdc00 + (codePoint & 0x3ff));
+      }
+    }
+    return result;
   }
 
   build() {
@@ -228,7 +401,7 @@ export struct ProxyPage {
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
           if (!this.statusMsg) {
-            Text(`${this.groups.length} groups · ${this.getNodeCount()} nodes · ${this.sourceMsg}`)
+            Text(`${this.groups.length} groups · ${this.getNodeCount()} options · ${this.sourceMsg}`)
               .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
               .maxLines(1)
@@ -264,6 +437,13 @@ export struct ProxyPage {
             .fontSize(13)
             .fontColor($r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
+          if (this.diagnosticMsg) {
+            Text(this.diagnosticMsg)
+              .fontSize(11)
+              .fontColor($r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .copyOption(CopyOptions.LocalDevice)
+          }
         }
         .width('90%')
         .padding(24)
@@ -278,7 +458,7 @@ export struct ProxyPage {
             ListItem() {
               ProxyGroupCard({
                 group: group,
-                canTestLatency: this.service !== null,
+                canTestLatency: this.loadedFromExtension && group.nodes.length > 0,
                 isTesting: this.testingGroup === group.name,
                 onSelectProxy: (gName: string, pName: string) => {
                   this.selectProxy(gName, pName);

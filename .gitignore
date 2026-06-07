@@ -10,15 +10,7 @@
 /.bitfun
 local.properties
 
-# Compiled binaries (build with mihomo-bridge/build.sh)
-mihomo-bridge/libmihomo.so
-mihomo-bridge/libmihomo_patched.so
-mihomo-bridge/libmihomo.h
-mihomo-bridge/mihomo
-clash/src/main/cpp/libs/
-clash/src/main/cpp/libmihomo.h
-clash/src/main/libs/
-clash/src/main/resources/rawfile/mihomo
-
-# Go cache
-mihomo-bridge/go.sum
+# Rust native core build products
+native-core/target/
+native-core/.cargo/config.toml
+clash/src/main/cpp/native-core/
