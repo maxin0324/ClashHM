@@ -82,9 +82,9 @@ Current repository state:
 
 - `native-core/` defines the Rust FFI ABI and basic Clash proxy-group parsing.
 - With the `shoes-backend` feature enabled, `native-core` converts the selected Clash node into a shoes TUN config and starts `shoes::tun::run_tun_from_config`.
-- The adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP, VMess, VLESS, Trojan, TLS/WS/HTTP2/Reality/ShadowTLS/v2ray-plugin WebSocket wrapping, and `mux`/`h2mux` options for VMess/VLESS/Trojan. It handles common Clash block options such as `ws-opts.path`, `ws-opts.headers.Host`, `h2-opts.path`, `h2-opts.host`, `reality-opts.public-key`, `reality-opts.short-id`, `reality-opts.server-name`, ShadowTLS `plugin-opts`, v2ray-plugin `plugin-opts`, and `udp: false`.
+- The adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP, VMess, VLESS, Trojan, TLS/WS/HTTP2/gRPC/Reality/ShadowTLS/v2ray-plugin WebSocket wrapping, and `mux`/`h2mux` options for VMess/VLESS/Trojan. It handles common Clash block options such as `ws-opts.path`, `ws-opts.headers.Host`, `h2-opts.path`, `h2-opts.host`, `grpc-opts.serviceName`, `reality-opts.public-key`, `reality-opts.short-id`, `reality-opts.server-name`, ShadowTLS `plugin-opts`, v2ray-plugin `plugin-opts`, and `udp: false`.
 - Flow-style proxy groups such as `proxies: [A, B, DIRECT]` are parsed without truncating at list commas. The ArkTS config parser uses the same nested-aware flow parsing for proxy display and provider expansion. The native parser also expands YAML-native inline `proxy-providers[].proxies` through group `use:` entries and YAML-native inline `rule-providers[].payload` through common `RULE-SET` entries.
-- Unsupported protocols or transports return explicit adapter errors. For example, `network: grpc`, Hysteria2, and TUIC are not silently treated as plain TCP. Clash/Xray `network: h2` now uses a real HTTP/2 transport wrapper and is not shoes/sing-box h2mux.
+- Unsupported protocols return explicit adapter errors. For example, Hysteria2 and TUIC are not silently treated as plain TCP. Clash/Xray `network: h2` and `network: grpc` now use real HTTP/2-based transport wrappers and are not shoes/sing-box h2mux.
 - Unsupported Shadowsocks plugins such as `obfs`/`simple-obfs` return explicit adapter errors instead of being silently treated as plain Shadowsocks.
 - Subscription update materializes remote `proxy-providers` and `rule-providers` to local files when the provider has a `url`. `ConfigManager.generateMergedConfig` expands local provider nodes and expands common `RULE-SET` entries from `domain`, `ipcidr`, and `classical` rule providers before sending config to the Extension.
 - The adapter maps common Clash rules to shoes TUN rules: `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, and basic `GEOSITE,cn/geolocation-cn`.
@@ -173,7 +173,7 @@ This avoids assuming that NAPI state in the UI process is the same as NAPI state
 14. Add optional CMake-triggered Rust static library build for DevEco GUI builds. Done.
 15. Produce and verify an actual OHOS Rust static library artifact in a DevEco/HarmonyOS SDK environment.
 16. Return explicit native-core adapter errors for unsupported high-impact routing rules and protocols instead of silently falling back to default routing. Done.
-17. Extend the Clash adapter to Hysteria2, TUIC, gRPC transport, full MMDB/dat backed GEOIP/GEOSITE, unexpanded/advanced RULE-SET forms, and full Clash rule parity.
+17. Extend the Clash adapter to Hysteria2, TUIC, full MMDB/dat backed GEOIP/GEOSITE, unexpanded/advanced RULE-SET forms, and full Clash rule parity.
 18. Replace the basic TCP latency probe with full Clash URL-test behavior, and wire real traffic/connections from the Extension core. Partially done: `url-test` and `fallback` groups now consume cached native-core latency results for automatic selection.
 19. Stop starting mihomo in the UI process by default. Done.
 20. Restore UI connection state from Extension status after UI process recreation. Done.

@@ -14,7 +14,7 @@ The project is currently focused on making a reliable HarmonyOS NEXT client with
 - Rule / Global / Direct modes
 - Traffic counters and connection status
 - Proxy TCP latency checks before and after VPN connection
-- Explicit unsupported-protocol errors for HY2, TUIC, and gRPC
+- Explicit unsupported-protocol errors for HY2 and TUIC
 - Chinese and English UI
 - Light and dark themes
 - No UI-process mihomo fallback path
@@ -38,6 +38,7 @@ Supported node types and options:
 - TLS
 - WebSocket
 - Clash/Xray `network: h2`
+- Clash/Xray `network: grpc`
 - Reality
 - ShadowTLS
 - v2ray-plugin WebSocket wrapping
@@ -61,7 +62,6 @@ Still unsupported or incomplete:
 
 - Hysteria2
 - TUIC
-- gRPC transport
 - Full MMDB/dat backed `GEOIP` / `GEOSITE` routing
 - simple-obfs / obfs Shadowsocks plugins
 - Full Clash-compatible URL-test behavior
@@ -169,12 +169,12 @@ Estimated work:
 
 - Hysteria2: large. Requires a real HY2 client implementation in the embedded backend or a backend replacement that exposes one. Adapter-only changes are not enough.
 - TUIC: large. Same reason as Hysteria2: the current backend does not expose a TUIC client outbound.
-- gRPC transport: medium to large. Requires mapping Clash/Xray gRPC transport semantics into a backend transport that actually supports gRPC, plus tests for TLS, SNI, service name, authority, and fallback behavior.
+- gRPC transport: initial backend support exists through a real gRPC-over-HTTP/2 transport wrapper with `grpc-opts.serviceName`. It still needs more real-device coverage across subscription variants.
 - Clash/Xray `network: h2`: initial backend support exists through a real HTTP/2 transport wrapper. It is not mapped to h2mux; it still needs more real-device coverage across subscription variants.
 
 Practical options:
 
-- Extend or replace the embedded backend with mature client implementations for HY2/TUIC/gRPC.
+- Extend or replace the embedded backend with mature client implementations for HY2/TUIC.
 - Keep the current strict adapter and add protocol support one backend capability at a time.
 - Avoid claiming compatibility for unsupported protocols until real traffic tests pass on device.
 

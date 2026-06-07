@@ -412,6 +412,8 @@ pub enum ClientProxyConfig {
     Websocket(WebsocketClientConfig),
     #[serde(rename = "h2", alias = "http2")]
     Http2Transport(Http2TransportClientConfig),
+    #[serde(rename = "grpc")]
+    GrpcTransport(GrpcTransportClientConfig),
     #[serde(alias = "noop")]
     PortForward,
     /// AnyTLS outbound protocol
@@ -460,6 +462,7 @@ impl ClientProxyConfig {
             ClientProxyConfig::Vmess { .. } => "VMess",
             ClientProxyConfig::Websocket(..) => "WebSocket",
             ClientProxyConfig::Http2Transport(..) => "HTTP/2 Transport",
+            ClientProxyConfig::GrpcTransport(..) => "gRPC Transport",
             ClientProxyConfig::PortForward => "PortForward",
             ClientProxyConfig::Anytls { .. } => "AnyTLS",
             ClientProxyConfig::Naiveproxy { .. } => "NaiveProxy",
@@ -518,6 +521,17 @@ pub struct Http2TransportClientConfig {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+    pub protocol: Box<ClientProxyConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GrpcTransportClientConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
     pub protocol: Box<ClientProxyConfig>,

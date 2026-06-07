@@ -266,6 +266,17 @@ fn proxy_from_flow(line: &str) -> Option<ProxyNode> {
     if !h2_host.is_empty() {
         assign_proxy_field(&mut proxy, "h2-host", h2_host);
     }
+    for key in [
+        "grpc-opts.serviceName",
+        "grpc-opts.service-name",
+        "grpc-opts.grpc-service-name",
+    ] {
+        let grpc_service_name = flow_value(line, key);
+        if !grpc_service_name.is_empty() {
+            assign_proxy_field(&mut proxy, "grpc-service-name", grpc_service_name);
+            break;
+        }
+    }
     let reality_public_key = flow_value(line, "reality-opts.public-key");
     if !reality_public_key.is_empty() {
         assign_proxy_field(&mut proxy, "public-key", reality_public_key);
@@ -455,11 +466,24 @@ fn assign_h2_transport_opt(proxy: &mut ProxyNode, key: &str, value: String) {
     }
 }
 
+fn assign_grpc_transport_opt(proxy: &mut ProxyNode, key: &str, value: String) {
+    match key {
+        "serviceName" | "service-name" | "grpc-service-name" | "service_name" => {
+            assign_proxy_field(proxy, "grpc-service-name", value)
+        }
+        "authority" | "host" | "Host" => assign_proxy_field(proxy, "grpc-authority", value),
+        _ => {
+            proxy.fields.insert(format!("grpc-{key}"), value);
+        }
+    }
+}
+
 fn assign_proxy_nested_field(proxy: &mut ProxyNode, section: &str, key: &str, value: String) {
     match section {
         "plugin-opts" => assign_plugin_opt(proxy, key, value),
         "ws-opts" | "ws-headers" => assign_ws_opt(proxy, key, value),
         "h2-opts" | "http2-opts" => assign_h2_transport_opt(proxy, key, value),
+        "grpc-opts" => assign_grpc_transport_opt(proxy, key, value),
         "reality-opts" => assign_reality_opt(proxy, key, value),
         "tls-opts" => assign_tls_opt(proxy, key, value),
         "h2mux" | "mux" | "smux" => assign_h2mux_opt(proxy, key, value),
@@ -584,6 +608,8 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "h2mux-padding",
         "h2-path",
         "h2-host",
+        "grpc-service-name",
+        "grpc-authority",
         "plugin",
         "shadow-tls-password",
         "shadowtls-password",
@@ -607,6 +633,7 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "ws-opts",
         "h2-opts",
         "http2-opts",
+        "grpc-opts",
         "reality-opts",
         "tls-opts",
         "h2mux",
@@ -916,6 +943,7 @@ fn parse_clash_config_fallback(config: &str) -> (Vec<ProxyNode>, Vec<ProxyGroup>
                         | "ws-opts:"
                         | "h2-opts:"
                         | "http2-opts:"
+                        | "grpc-opts:"
                         | "headers:"
                         | "reality-opts:"
                         | "tls-opts:"
@@ -1549,6 +1577,38 @@ fn wrap_http2_transport(proxy: &ProxyNode, inner: String, indent: usize) -> Stri
     out
 }
 
+fn wrap_grpc_transport(proxy: &ProxyNode, inner: String, indent: usize) -> String {
+    let pad = protocol_indent(indent);
+    let inner_pad = protocol_indent(indent + 2);
+    let service_name = proxy_field(proxy, "grpc-service-name");
+    let authority = first_csv_value(proxy_field_any(
+        proxy,
+        &["grpc-authority", "host", "servername", "sni"],
+    ));
+    let authority = if authority.is_empty() {
+        proxy_field(proxy, "server").to_string()
+    } else {
+        authority
+    };
+    let mut out = format!("{pad}type: grpc\n");
+    if !service_name.is_empty() {
+        out.push_str(&format!(
+            "{pad}service_name: {}\n",
+            yaml_quote(service_name)
+        ));
+    }
+    if !authority.is_empty() {
+        out.push_str(&format!("{pad}authority: {}\n", yaml_quote(&authority)));
+    }
+    out.push_str(&format!("{pad}protocol:\n"));
+    for line in inner.lines() {
+        out.push_str(&inner_pad);
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
     let pad = protocol_indent(indent);
     let inner_pad = protocol_indent(indent + 2);
@@ -1585,6 +1645,7 @@ fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
         || proxy_field(proxy, "network").eq_ignore_ascii_case("h2")
         || proxy_field(proxy, "network").eq_ignore_ascii_case("http")
         || proxy_field(proxy, "network").eq_ignore_ascii_case("http2")
+        || proxy_field(proxy, "network").eq_ignore_ascii_case("grpc")
     {
         if alpn.is_empty() {
             out.push_str(&format!("{pad}alpn_protocols: \"h2\"\n"));
@@ -1674,6 +1735,8 @@ fn build_proxy_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Stri
         protocol = wrap_websocket(proxy, protocol, indent);
     } else if network == "h2" || network == "http" || network == "http2" {
         protocol = wrap_http2_transport(proxy, protocol, indent);
+    } else if network == "grpc" {
+        protocol = wrap_grpc_transport(proxy, protocol, indent);
     } else if !network.is_empty() && network != "tcp" {
         return Err(unsupported_network_error(proxy, &network));
     }
@@ -2977,10 +3040,18 @@ proxy-groups:
     }
 
     #[test]
-    fn rejects_unsupported_grpc_network_instead_of_silently_using_tcp() {
+    fn builds_grpc_transport_config() {
         let config = r#"
 proxies:
-  - { name: VLESS GRPC, type: vless, server: grpc.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: grpc }
+  - name: VLESS GRPC
+    type: vless
+    server: grpc.example.com
+    port: 443
+    uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0
+    tls: true
+    network: grpc
+    grpc-opts:
+      serviceName: proxy
 proxy-groups:
   - name: Proxy
     type: select
@@ -2988,8 +3059,21 @@ proxy-groups:
       - VLESS GRPC
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
-        let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
-        assert!(error.contains("gRPC client transport wrapper"), "{error}");
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("type: tls"), "{shoes_config}");
+        assert!(
+            shoes_config.contains("alpn_protocols: \"h2\""),
+            "{shoes_config}"
+        );
+        assert!(shoes_config.contains("type: grpc"), "{shoes_config}");
+        assert!(
+            shoes_config.contains("service_name: \"proxy\""),
+            "{shoes_config}"
+        );
+        assert!(
+            shoes_config.contains("authority: \"grpc.example.com\""),
+            "{shoes_config}"
+        );
     }
 
     #[test]
@@ -3411,6 +3495,26 @@ proxy-groups:
     type: select
     proxies:
       - VLESS H2
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(
+            shoes::config::load_config_str(&shoes_config).is_ok(),
+            "{shoes_config}"
+        );
+    }
+
+    #[cfg(feature = "shoes-backend")]
+    #[test]
+    fn generated_grpc_transport_config_is_parseable_by_shoes() {
+        let config = r#"
+proxies:
+  - { name: VLESS GRPC, type: vless, server: grpc.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: grpc, grpc-opts: { serviceName: proxy } }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - VLESS GRPC
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();

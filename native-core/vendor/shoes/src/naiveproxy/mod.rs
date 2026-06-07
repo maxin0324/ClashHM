@@ -1,3 +1,4 @@
+mod grpc_transport_handler;
 mod h2_multi_stream;
 mod h2_transport_handler;
 mod naive_client_handler;
@@ -7,6 +8,7 @@ mod naive_padding_stream;
 mod naive_server_handler;
 mod user_lookup;
 
+pub use grpc_transport_handler::GrpcTransportTcpClientHandler;
 pub use h2_transport_handler::H2TransportTcpClientHandler;
 pub use naive_client_handler::NaiveProxyTcpClientHandler;
 pub use naive_server_handler::setup_naive_server_stream;
