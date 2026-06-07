@@ -45,11 +45,7 @@ export class ConfigManager {
       fileIo.readSync(file.fd, buf);
       fileIo.closeSync(file);
       const view = new Uint8Array(buf);
-      const bytes: number[] = [];
-      for (let i = 0; i < view.length; i++) {
-        bytes.push(view[i]);
-      }
-      return this.decodeUtf8(bytes);
+      return this.decodeUtf8(view);
     } catch (e) {
       Logger.error('Failed to read config: %{public}s', String(e));
       return '';
@@ -256,11 +252,11 @@ rules:
 
       const topLevel = this.isTopLevel(line);
       if (topLevel) {
-        if (currentNode) {
+        if (currentNode && currentNode.name) {
           nodesByName.set(currentNode.name, currentNode);
           currentNode = null;
         }
-        if (currentGroup) {
+        if (currentGroup && currentGroup.name) {
           groups.push(currentGroup);
           currentGroup = null;
         }
@@ -296,13 +292,20 @@ rules:
             nodesByName.set(node.name, node);
           }
           currentNode = null;
+        } else if (trimmed === '-') {
+          if (currentNode && currentNode.name) {
+            nodesByName.set(currentNode.name, currentNode);
+          }
+          currentNode = this.createProxyNode('', '');
         } else if (trimmed.startsWith('- name:')) {
-          if (currentNode) {
+          if (currentNode && currentNode.name) {
             nodesByName.set(currentNode.name, currentNode);
           }
           currentNode = this.createProxyNode(this.stripQuotes(trimmed.substring(7).trim()), '');
         } else if (currentNode) {
-          if (trimmed.startsWith('type:')) {
+          if (trimmed.startsWith('name:')) {
+            currentNode.name = this.stripQuotes(trimmed.substring(5).trim());
+          } else if (trimmed.startsWith('type:')) {
             currentNode.type = this.stripQuotes(trimmed.substring(5).trim());
           } else if (trimmed.startsWith('server:')) {
             currentNode.server = this.stripQuotes(trimmed.substring(7).trim());
@@ -312,21 +315,29 @@ rules:
         }
       } else if (section === 'proxy-groups') {
         if (trimmed.startsWith('- {')) {
-          if (currentGroup) {
+          if (currentGroup && currentGroup.name) {
             groups.push(currentGroup);
           }
           const name = this.parseFlowValue(trimmed, 'name');
           currentGroup = this.createProxyGroup(name, this.parseFlowValue(trimmed, 'type'));
           currentGroup.all = this.parseFlowList(trimmed, 'proxies');
           readingGroupProxies = false;
+        } else if (trimmed === '-') {
+          if (currentGroup && currentGroup.name) {
+            groups.push(currentGroup);
+          }
+          currentGroup = this.createProxyGroup('', '');
+          readingGroupProxies = false;
         } else if (trimmed.startsWith('- name:')) {
-          if (currentGroup) {
+          if (currentGroup && currentGroup.name) {
             groups.push(currentGroup);
           }
           currentGroup = this.createProxyGroup(this.stripQuotes(trimmed.substring(7).trim()), '');
           readingGroupProxies = false;
         } else if (currentGroup) {
-          if (trimmed.startsWith('type:')) {
+          if (trimmed.startsWith('name:')) {
+            currentGroup.name = this.stripQuotes(trimmed.substring(5).trim());
+          } else if (trimmed.startsWith('type:')) {
             currentGroup.type = this.stripQuotes(trimmed.substring(5).trim());
           } else if (trimmed === 'proxies:') {
             readingGroupProxies = true;
@@ -339,10 +350,10 @@ rules:
       }
     }
 
-    if (currentNode) {
+    if (currentNode && currentNode.name) {
       nodesByName.set(currentNode.name, currentNode);
     }
-    if (currentGroup) {
+    if (currentGroup && currentGroup.name) {
       groups.push(currentGroup);
     }
 
@@ -1222,29 +1233,37 @@ rules:
     return value;
   }
 
-  private decodeUtf8(bytes: number[]): string {
-    let result = '';
+  private decodeUtf8(bytes: Uint8Array): string {
+    const parts: string[] = [];
+    let chunk = '';
     for (let i = 0; i < bytes.length; i++) {
       const b0 = bytes[i];
       if (b0 < 0x80) {
-        result += String.fromCharCode(b0);
+        chunk += String.fromCharCode(b0);
       } else if ((b0 & 0xe0) === 0xc0 && i + 1 < bytes.length) {
         const b1 = bytes[++i];
-        result += String.fromCharCode(((b0 & 0x1f) << 6) | (b1 & 0x3f));
+        chunk += String.fromCharCode(((b0 & 0x1f) << 6) | (b1 & 0x3f));
       } else if ((b0 & 0xf0) === 0xe0 && i + 2 < bytes.length) {
         const b1 = bytes[++i];
         const b2 = bytes[++i];
-        result += String.fromCharCode(((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f));
+        chunk += String.fromCharCode(((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f));
       } else if ((b0 & 0xf8) === 0xf0 && i + 3 < bytes.length) {
         const b1 = bytes[++i];
         const b2 = bytes[++i];
         const b3 = bytes[++i];
         let codePoint = ((b0 & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f);
         codePoint -= 0x10000;
-        result += String.fromCharCode(0xd800 + (codePoint >> 10));
-        result += String.fromCharCode(0xdc00 + (codePoint & 0x3ff));
+        chunk += String.fromCharCode(0xd800 + (codePoint >> 10));
+        chunk += String.fromCharCode(0xdc00 + (codePoint & 0x3ff));
+      }
+      if (chunk.length >= 4096) {
+        parts.push(chunk);
+        chunk = '';
       }
     }
-    return result;
+    if (chunk.length > 0) {
+      parts.push(chunk);
+    }
+    return parts.join('');
   }
 }
