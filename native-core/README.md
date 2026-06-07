@@ -10,10 +10,10 @@ Current state:
 - Can load a Clash config without starting TUN so the UI process can perform local TCP latency probes while disconnected.
 - Parses Clash config with `serde_yaml` first, then falls back to the older line parser. This is closer to mihomo's tolerant YAML handling and supports common block and flow-style subscription output.
 - Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and common YAML-native inline `rule-providers[].payload` referenced by `RULE-SET`.
-- Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, MMDB-backed `GEOIP,<country-code>`, basic `GEOSITE,cn/geolocation-cn`, and local-domain `GEOSITE,private/local/lan` to shoes TUN rules.
+- Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, MMDB-backed `GEOIP,<country-code>`, built-in private `GEOSITE,cn/private/local/lan`, and dat-backed `GEOSITE,<category>` entries to shoes TUN rules.
 - Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, or `DST-PORT`.
 - Updates `url-test` and `fallback` group selections from cached native-core latency results.
-- Skips currently unsupported routing rules such as full dat backed `GEOSITE` categories and unexpanded/advanced `RULE-SET`, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
+- Skips currently unsupported routing rules such as unexpanded/advanced `RULE-SET` forms and GEOSITE regex entries that cannot be represented by the embedded matcher, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
 - Receives provider-expanded Clash config from the ArkTS config layer. Remote `proxy-providers` are materialized during subscription update; local provider nodes are expanded before the config is sent to the Extension.
 - Returns deterministic status from the embedded backend.
 - Vendors the patched `shoes` backend under `native-core/vendor/shoes`, so builds no longer depend on a temporary `/tmp` checkout.
@@ -39,7 +39,7 @@ Compatibility references:
 - mihomo rule-provider docs: https://wiki.metacubex.one/en/config/rule-providers/
 - mihomo general config docs: https://wiki.metacubex.one/en/config/general/
 
-The current parser follows the same broad shape by accepting YAML-native objects first and keeping a fallback parser for subscription quirks. Full mihomo parity is still larger than parsing alone: remote provider refresh, rule-provider materialization, GeoSite/GeoIP data, sniffing, and unsupported transport implementations remain separate adapter work.
+The current parser follows the same broad shape by accepting YAML-native objects first and keeping a fallback parser for subscription quirks. Full mihomo parity is still larger than parsing alone: remote provider refresh, advanced rule-provider materialization, sniffing, and unsupported transport implementations remain separate adapter work.
 
 Local validation completed:
 

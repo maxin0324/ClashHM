@@ -320,6 +320,7 @@ dependencies = [
 name = "clashhm-native-core"
 version = "0.1.0"
 dependencies = [
+ "miniz_oxide",
  "serde_yaml",
  "sha3",
  "shoes",

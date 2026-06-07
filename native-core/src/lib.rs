@@ -36,6 +36,13 @@ struct ClashRule {
     target: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct GeositeCategory {
+    masks: Vec<String>,
+    keywords: Vec<String>,
+    skipped_regex: usize,
+}
+
 #[derive(Default)]
 struct CoreState {
     home_dir: String,
@@ -56,6 +63,8 @@ struct CoreState {
 }
 
 static STATE: OnceLock<Mutex<CoreState>> = OnceLock::new();
+static GEOSITE_DATA: OnceLock<Result<BTreeMap<String, GeositeCategory>, String>> = OnceLock::new();
+const GEOSITE_DAT_Z: &[u8] = include_bytes!("../assets/geosite.dat.z");
 
 fn state() -> &'static Mutex<CoreState> {
     STATE.get_or_init(|| Mutex::new(CoreState::default()))
@@ -1850,17 +1859,216 @@ fn rule_mask(rule: &ClashRule) -> Option<String> {
     }
 }
 
-fn geosite_suffixes(payload: &str) -> Option<Vec<&'static str>> {
+fn read_pb_varint(bytes: &[u8], pos: &mut usize) -> Option<u64> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    while *pos < bytes.len() && shift < 64 {
+        let byte = bytes[*pos];
+        *pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+    }
+    None
+}
+
+fn read_pb_len<'a>(bytes: &'a [u8], pos: &mut usize) -> Option<&'a [u8]> {
+    let len = read_pb_varint(bytes, pos)? as usize;
+    if bytes.len().saturating_sub(*pos) < len {
+        return None;
+    }
+    let out = &bytes[*pos..*pos + len];
+    *pos += len;
+    Some(out)
+}
+
+fn skip_pb_field(bytes: &[u8], pos: &mut usize, wire_type: u64) -> Option<()> {
+    match wire_type {
+        0 => read_pb_varint(bytes, pos).map(|_| ()),
+        1 => {
+            *pos = pos.checked_add(8)?;
+            (*pos <= bytes.len()).then_some(())
+        }
+        2 => read_pb_len(bytes, pos).map(|_| ()),
+        5 => {
+            *pos = pos.checked_add(4)?;
+            (*pos <= bytes.len()).then_some(())
+        }
+        _ => None,
+    }
+}
+
+fn parse_geosite_attribute(bytes: &[u8]) -> Option<String> {
+    let mut pos = 0usize;
+    let mut key = String::new();
+    let mut bool_value = false;
+    while pos < bytes.len() {
+        let tag = read_pb_varint(bytes, &mut pos)?;
+        let field = tag >> 3;
+        let wire_type = tag & 0x07;
+        match (field, wire_type) {
+            (1, 2) => key = String::from_utf8_lossy(read_pb_len(bytes, &mut pos)?).to_string(),
+            (2, 0) => bool_value = read_pb_varint(bytes, &mut pos)? != 0,
+            _ => skip_pb_field(bytes, &mut pos, wire_type)?,
+        }
+    }
+    if bool_value && !key.is_empty() {
+        Some(key.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+fn parse_geosite_domain(bytes: &[u8]) -> Option<(u64, String, Vec<String>)> {
+    let mut pos = 0usize;
+    let mut domain_type = 0u64;
+    let mut value = String::new();
+    let mut attrs = Vec::new();
+    while pos < bytes.len() {
+        let tag = read_pb_varint(bytes, &mut pos)?;
+        let field = tag >> 3;
+        let wire_type = tag & 0x07;
+        match (field, wire_type) {
+            (1, 0) => domain_type = read_pb_varint(bytes, &mut pos)?,
+            (2, 2) => value = String::from_utf8_lossy(read_pb_len(bytes, &mut pos)?).to_string(),
+            (3, 2) => {
+                if let Some(attr) = parse_geosite_attribute(read_pb_len(bytes, &mut pos)?) {
+                    attrs.push(attr);
+                }
+            }
+            _ => skip_pb_field(bytes, &mut pos, wire_type)?,
+        }
+    }
+    (!value.is_empty()).then_some((domain_type, value, attrs))
+}
+
+fn parse_geosite_entry(bytes: &[u8]) -> Option<Vec<(String, GeositeCategory)>> {
+    let mut pos = 0usize;
+    let mut category = String::new();
+    let mut entries: Vec<(u64, String, Vec<String>)> = Vec::new();
+    while pos < bytes.len() {
+        let tag = read_pb_varint(bytes, &mut pos)?;
+        let field = tag >> 3;
+        let wire_type = tag & 0x07;
+        match (field, wire_type) {
+            (1, 2) => {
+                category =
+                    String::from_utf8_lossy(read_pb_len(bytes, &mut pos)?).to_ascii_lowercase()
+            }
+            (2, 2) => {
+                if let Some(domain) = parse_geosite_domain(read_pb_len(bytes, &mut pos)?) {
+                    entries.push(domain);
+                }
+            }
+            _ => skip_pb_field(bytes, &mut pos, wire_type)?,
+        }
+    }
+    if category.is_empty() {
+        return None;
+    }
+    let mut all = GeositeCategory::default();
+    let mut by_attr: BTreeMap<String, GeositeCategory> = BTreeMap::new();
+    for (domain_type, value, attrs) in entries {
+        add_geosite_domain(&mut all, domain_type, &value);
+        for attr in attrs {
+            add_geosite_domain(by_attr.entry(attr).or_default(), domain_type, &value);
+        }
+    }
+    let mut output = vec![(category.clone(), all)];
+    for (attr, attr_category) in by_attr {
+        output.push((format!("{category}@{attr}"), attr_category));
+    }
+    Some(output)
+}
+
+fn add_geosite_domain(category: &mut GeositeCategory, domain_type: u64, value: &str) {
+    let value = value.trim().trim_start_matches('.').to_ascii_lowercase();
+    if value.is_empty() {
+        return;
+    }
+    match domain_type {
+        0 => category.keywords.push(value),
+        2 | 3 => category.masks.push(value),
+        1 => category.skipped_regex += 1,
+        _ => {}
+    }
+}
+
+fn parse_geosite_dat(bytes: &[u8]) -> Result<BTreeMap<String, GeositeCategory>, String> {
+    let mut pos = 0usize;
+    let mut map = BTreeMap::new();
+    while pos < bytes.len() {
+        let tag = read_pb_varint(bytes, &mut pos).ok_or("invalid geosite protobuf tag")?;
+        let field = tag >> 3;
+        let wire_type = tag & 0x07;
+        match (field, wire_type) {
+            (1, 2) => {
+                if let Some(entries) = parse_geosite_entry(
+                    read_pb_len(bytes, &mut pos).ok_or("invalid geosite entry")?,
+                ) {
+                    for (name, category) in entries {
+                        map.insert(name, category);
+                    }
+                }
+            }
+            _ => skip_pb_field(bytes, &mut pos, wire_type)
+                .ok_or_else(|| format!("invalid geosite protobuf wire type {wire_type}"))?,
+        }
+    }
+    Ok(map)
+}
+
+fn geosite_data() -> Result<&'static BTreeMap<String, GeositeCategory>, String> {
+    GEOSITE_DATA
+        .get_or_init(|| {
+            let dat = miniz_oxide::inflate::decompress_to_vec_zlib(GEOSITE_DAT_Z)
+                .map_err(|e| format!("failed to decompress geosite.dat: {e:?}"))?;
+            parse_geosite_dat(&dat)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn hardcoded_geosite_category(payload: &str) -> Option<GeositeCategory> {
     match payload
         .trim()
         .trim_start_matches("geosite:")
         .to_ascii_lowercase()
         .as_str()
     {
-        "cn" | "geolocation-cn" => Some(vec!["cn"]),
-        "private" | "local" | "lan" => Some(vec!["localhost", "local", "lan", "home.arpa"]),
+        "cn" => Some(GeositeCategory {
+            masks: vec!["cn".to_string()],
+            ..GeositeCategory::default()
+        }),
+        "private" | "local" | "lan" => Some(GeositeCategory {
+            masks: vec![
+                "localhost".to_string(),
+                "local".to_string(),
+                "lan".to_string(),
+                "home.arpa".to_string(),
+            ],
+            ..GeositeCategory::default()
+        }),
         _ => None,
     }
+}
+
+fn geosite_category(payload: &str) -> Option<GeositeCategory> {
+    let category = payload
+        .trim()
+        .trim_start_matches("geosite:")
+        .to_ascii_lowercase();
+    if let Some(entry) = hardcoded_geosite_category(&category) {
+        return Some(entry);
+    }
+    if let Ok(data) = geosite_data() {
+        if let Some(entry) = data.get(category.as_str()) {
+            return Some(entry.clone());
+        }
+    }
+    None
 }
 
 fn geoip_cidrs(payload: &str) -> Option<Vec<&'static str>> {
@@ -1904,13 +2112,16 @@ fn modeled_rule_masks(rule: &ClashRule) -> Option<Vec<String>> {
     if let Some(mask) = rule_mask(rule) {
         return Some(vec![mask]);
     }
-    if rule.rule_type == "GEOSITE" {
-        return geosite_suffixes(&rule.payload)
-            .map(|suffixes| suffixes.into_iter().map(str::to_string).collect());
-    }
     if rule.rule_type == "GEOIP" {
         return geoip_cidrs(&rule.payload)
             .map(|cidrs| cidrs.into_iter().map(str::to_string).collect());
+    }
+    None
+}
+
+fn modeled_geosite_category(rule: &ClashRule) -> Option<GeositeCategory> {
+    if rule.rule_type == "GEOSITE" {
+        return geosite_category(&rule.payload);
     }
     None
 }
@@ -1928,14 +2139,40 @@ fn build_domain_keyword_rule_yaml(
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
 ) -> Result<String, String> {
+    build_domain_keywords_rule_yaml(&[keyword.to_string()], target, groups, proxies)
+}
+
+fn yaml_quoted_list(values: &[String], indent: &str) -> String {
+    if values.len() == 1 {
+        return yaml_quote(&values[0]);
+    }
+    let mut out = String::from("\n");
+    for value in values {
+        out.push_str(indent);
+        out.push_str("- ");
+        out.push_str(&yaml_quote(value));
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
+fn build_domain_keywords_rule_yaml(
+    keywords: &[String],
+    target: &str,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+) -> Result<String, String> {
+    if keywords.is_empty() {
+        return Ok(String::new());
+    }
     match build_rule_client_chain(target, groups, proxies)? {
         Some(chain) => Ok(format!(
             "    - masks: \"0.0.0.0/0\"\n      domain_keywords: {}\n      action: allow\n      client_chain:\n{chain}",
-            yaml_quote(keyword)
+            yaml_quoted_list(keywords, "        ")
         )),
         None => Ok(format!(
             "    - masks: \"0.0.0.0/0\"\n      domain_keywords: {}\n      action: block\n",
-            yaml_quote(keyword)
+            yaml_quoted_list(keywords, "        ")
         )),
     }
 }
@@ -1945,6 +2182,7 @@ fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
     for rule in rules {
         if rule.rule_type == "DOMAIN-KEYWORD"
             || modeled_rule_masks(rule).is_some()
+            || modeled_geosite_category(rule).is_some()
             || modeled_geoip_country(rule).is_some()
         {
             continue;
@@ -1962,6 +2200,7 @@ fn skipped_rule_count(rules: &[ClashRule]) -> usize {
         .filter(|rule| {
             rule.rule_type != "DOMAIN-KEYWORD"
                 && modeled_rule_masks(rule).is_none()
+                && modeled_geosite_category(rule).is_none()
                 && modeled_geoip_country(rule).is_none()
         })
         .count()
@@ -1993,6 +2232,27 @@ fn build_rule_yaml(
         None => Ok(format!(
             "    - masks: {}\n      action: block\n",
             yaml_quote(mask)
+        )),
+    }
+}
+
+fn build_rule_masks_yaml(
+    masks: &[String],
+    target: &str,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+) -> Result<String, String> {
+    if masks.is_empty() {
+        return Ok(String::new());
+    }
+    match build_rule_client_chain(target, groups, proxies)? {
+        Some(chain) => Ok(format!(
+            "    - masks: {}\n      action: allow\n      client_chain:\n{chain}",
+            yaml_quoted_list(masks, "        ")
+        )),
+        None => Ok(format!(
+            "    - masks: {}\n      action: block\n",
+            yaml_quoted_list(masks, "        ")
         )),
     }
 }
@@ -2039,6 +2299,21 @@ fn build_shoes_rules(
         if rule.rule_type == "DOMAIN-KEYWORD" {
             out.push_str(&build_domain_keyword_rule_yaml(
                 &rule.payload,
+                &rule.target,
+                groups,
+                proxies,
+            )?);
+            continue;
+        }
+        if let Some(category) = modeled_geosite_category(rule) {
+            out.push_str(&build_rule_masks_yaml(
+                &category.masks,
+                &rule.target,
+                groups,
+                proxies,
+            )?);
+            out.push_str(&build_domain_keywords_rule_yaml(
+                &category.keywords,
                 &rule.target,
                 groups,
                 proxies,
@@ -2753,13 +3028,39 @@ rules:
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
         assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
         assert!(shoes_config.contains("masks: \"192.168.0.0/16\""));
-        assert!(shoes_config.contains("masks: \"cn\""));
-        assert!(shoes_config.contains("masks: \"localhost\""));
-        assert!(shoes_config.contains("masks: \"local\""));
-        assert!(shoes_config.contains("masks: \"lan\""));
-        assert!(shoes_config.contains("masks: \"home.arpa\""));
+        assert!(shoes_config.contains("masks:"));
+        assert!(shoes_config.contains("\"localhost\""));
+        assert!(shoes_config.contains("\"local\""));
+        assert!(shoes_config.contains("\"lan\""));
+        assert!(shoes_config.contains("\"home.arpa\""));
         assert!(shoes_config.contains("type: direct"));
         assert!(shoes_config.contains("address: \"proxy.example.com:443\""));
+    }
+
+    #[cfg(feature = "shoes-backend")]
+    #[test]
+    fn maps_dat_backed_geosite_rules() {
+        let config = r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rules:
+  - GEOSITE,geolocation-cn,DIRECT
+  - GEOSITE,google,Proxy
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("\"0033.cn\""), "{shoes_config}");
+        assert!(shoes_config.contains("\"google.com\""), "{shoes_config}");
+        assert!(
+            shoes::config::load_config_str(&shoes_config).is_ok(),
+            "{shoes_config}"
+        );
     }
 
     #[test]
@@ -3378,7 +3679,7 @@ rules:
   - GEOIP,PRIVATE,DIRECT
   - GEOSITE,cn,DIRECT
   - GEOIP,CN,DIRECT
-  - GEOSITE,category-ads-all,DIRECT
+  - GEOSITE,definitely-missing-category,DIRECT
   - MATCH,Proxy
 "#,
         )
@@ -3488,7 +3789,7 @@ rules:
         assert!(shoes_config.contains("0.0.0.0/0"));
         assert!(shoes_config.contains("domain_keywords: \"google\""));
         assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
-        assert!(shoes_config.contains("masks: \"cn\""));
+        assert!(shoes_config.contains("masks:"));
         assert!(shoes_config.contains("geoip_countries: \"CN\""));
         assert!(!shoes_config.contains("masks: \"CN\""));
     }

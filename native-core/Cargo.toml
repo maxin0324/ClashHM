@@ -17,6 +17,7 @@ shoes-backend = ["dep:shoes", "dep:sha3", "dep:tokio"]
 sha3 = { version = "=0.11.0", optional = true }
 shoes = { path = "vendor/shoes", default-features = false, optional = true }
 serde_yaml = "0.9"
+miniz_oxide = "0.8"
 tokio = { version = "*", features = ["rt-multi-thread", "sync"], optional = true }
 
 [profile.release]

@@ -139,20 +139,20 @@ The embedded backend currently models routing through `NetLocationMask`. This ha
 - `DST-PORT`
 - basic `GEOIP,PRIVATE/LAN`
 - MMDB-backed `GEOIP,<country-code>`
-- basic `GEOSITE,cn/geolocation-cn`
-- local-domain `GEOSITE,private/local/lan`
+- built-in private `GEOSITE,cn/private/local/lan`
+- dat-backed `GEOSITE,<category>` Domain/Full/Plain entries
 
 The following need backend matcher expansion:
 
-- full MMDB/dat backed `GEOSITE`
+- GEOSITE regex entries that cannot be represented by `NetLocationMask`
 - advanced / unresolved `RULE-SET`
 
 Current behavior is explicit diagnostic fallback: unsupported rules are skipped, and status JSON reports `skippedRuleCount` and `skippedRuleTypes`.
 
 ## Recommended Implementation Order
 
-1. Finish rule matcher expansion before new transport protocols.
-2. Add local dat based full `GEOSITE` support.
+1. Finish advanced `RULE-SET` and remaining matcher gaps before new transport protocols.
+2. Harden subscription compatibility against more mihomo-style provider and rule-provider variants.
 3. Add HY2 and TUIC only after the backend has a real QUIC client path.
 
 Reasoning: rule and DNS correctness affects every existing protocol, while HY2/TUIC only affect subscriptions that use those node types.
