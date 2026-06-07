@@ -7,23 +7,23 @@ The HarmonyOS app no longer keeps a mihomo/tun2socks fallback. DevEco/Hvigor bui
 Current state:
 
 - Defines the stable native API.
-- Can load a Clash config without starting TUN so the UI process can perform local TCP latency probes while disconnected.
+- Can load a Clash config without starting TUN so the UI process can perform local proxy-chain latency probes while disconnected.
 - Parses Clash config with `serde_yaml` first, then falls back to the older line parser. This is closer to mihomo's tolerant YAML handling and supports common block and flow-style subscription output.
-- Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and common YAML-native inline `rule-providers[].payload` referenced by `RULE-SET`.
+- Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and local/inline `rule-providers[].payload` or `rule-providers[].rules` referenced by `RULE-SET`.
 - Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, MMDB-backed `GEOIP,<country-code>`, built-in private `GEOSITE,cn/private/local/lan`, and dat-backed `GEOSITE,<category>` entries to shoes TUN rules.
-- Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, or `DST-PORT`.
+- Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, `GEOIP`, or `GEOSITE`. Domain providers also accept common mihomo-style `domain:`, `full:`, and `keyword:` prefixes. The ArkTS config merge path accepts block-style and common flow-style provider definitions plus provider files with wrapped sections, inline arrays, or direct top-level lists.
 - Updates `url-test` and `fallback` group selections from cached native-core latency results.
-- Skips currently unsupported routing rules such as unexpanded/advanced `RULE-SET` forms and GEOSITE regex entries that cannot be represented by the embedded matcher, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
+- Skips currently unsupported routing rules such as unresolved dynamic `RULE-SET` forms and GEOSITE regex entries that cannot be represented by the embedded matcher, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
 - Receives provider-expanded Clash config from the ArkTS config layer. Remote `proxy-providers` are materialized during subscription update; local provider nodes are expanded before the config is sent to the Extension.
 - Returns deterministic status from the embedded backend.
 - Vendors the patched `shoes` backend under `native-core/vendor/shoes`, so builds no longer depend on a temporary `/tmp` checkout.
-- With `shoes-backend`, converts the selected Clash node into a shoes TUN config and starts the shoes TUN runner. The current adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/HTTPS, VMess, VLESS, Trojan, TLS/WebSocket/HTTP2/gRPC/Reality/ShadowTLS wrappers, and `mux`/`h2mux` options for VMess/VLESS/Trojan.
+- With `shoes-backend`, converts the selected Clash node into a shoes TUN config and starts the shoes TUN runner. The current adapter supports `direct`, Shadowsocks, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/HTTPS, VMess, VLESS, Trojan, Hysteria2 TCP outbound, TUIC TCP outbound, first-hop HY2/TUIC UDP datagrams with fragmentation/reassembly, TLS/WebSocket/HTTP2/gRPC/Reality/ShadowTLS wrappers, and `mux`/`h2mux` options for VMess/VLESS/Trojan.
 - Parses common nested Clash options for supported transports, including `ws-opts.path`, `ws-opts.headers.Host`, `h2-opts.path`, `h2-opts.host`, `grpc-opts.serviceName`, `reality-opts.public-key`, `reality-opts.short-id`, `reality-opts.server-name`, `tls-opts`, and ShadowTLS `plugin-opts`.
 - Honors common `udp: false` on supported nodes.
-- Fails explicitly for unsupported outbound protocols such as Hysteria2 and TUIC. The vendored shoes backend currently has Hysteria2/TUIC server-side code but no client outbound config/handler. Clash/Xray `network: h2` and `network: grpc` are implemented as real HTTP/2-based wrappers and are not mapped to shoes/sing-box h2mux.
+- Hysteria2 and TUIC have initial TCP outbound plus first-hop UDP datagram support with fragmentation/reassembly. HY2 credential aliases `auth`/`auth-str` and TUIC `token` are normalized to backend passwords. HY2 obfs and non-default TUIC congestion options still return explicit adapter errors until implemented. Clash/Xray `network: h2` and `network: grpc` are implemented as real HTTP/2-based wrappers and are not mapped to shoes/sing-box h2mux.
 - Applies proxy selection inside the Extension. Current running selections are recorded quickly and take effect on the next VPN core start; hot backend reload is still a later task. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
 - The patched shoes backend converts TUN UDP/53 DNS queries into DNS-over-TCP over the selected proxy chain. This avoids the common Trojan UDP gap where the VPN appears connected but domains cannot resolve.
-- Provides a basic TCP connect latency probe for parsed proxy nodes, including disconnected local probes after `load_config`, returns cached latency in proxy-group JSON, and uses those results to update `url-test` / `fallback` group choices. Full Clash-style URL testing through every proxy protocol is still a later adapter task.
+- Provides a proxy-chain HTTP URL-test probe for parsed proxy nodes, including disconnected local probes after `load_config`. The probe connects through the selected shoes client chain to the configured URL, performs HTTP/HTTPS GET status validation, returns cached latency in proxy-group JSON, and uses those results to update `url-test` / `fallback` group choices.
 - Returns structured runtime status with backend name, selected group/proxy, parsed object counts, uptime, last error, and last latency probe result.
 - Exposes traffic and connection APIs through the native boundary. Traffic totals and speeds are now sourced from the patched shoes TUN read/write path.
 
@@ -64,6 +64,14 @@ By default the script builds with `--features shoes-backend`, then copies:
 
 - `clash/src/main/cpp/native-core/libclashhm_native_core.a`
 - `clash/src/main/cpp/native-core/native_core.h`
+
+It also writes tracked split parts named `libclashhm_native_core.a.partNN`. DevEco/CMake reconstructs `libclashhm_native_core.a` from those parts when the full local archive is missing, so Git does not need to track a 100 MiB single file.
+
+Verify the checked-out full archive and split parts before publishing:
+
+```bash
+bash scripts/verify-native-core-artifact.sh
+```
 
 If `rustup` is present, the script installs the `aarch64-unknown-linux-ohos` target first; without `rustup`, it directly tries the current Rust toolchain. Missing tools now fail the app build because there is no runtime fallback data path.
 

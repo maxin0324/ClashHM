@@ -9,10 +9,10 @@ This checklist is for producing a GitHub-facing ClashHM build that is safe to te
 - HarmonyOS Native SDK
 - ARM64 test device
 - Tracked native-core artifacts:
-  - `clash/src/main/cpp/native-core/libclashhm_native_core.a`
+  - `clash/src/main/cpp/native-core/libclashhm_native_core.a.partNN`
   - `clash/src/main/cpp/native-core/native_core.h`
 
-The tracked static library lets DevEco build without Rust/Cargo on the developer machine. If the Rust native core changes, rebuild it before committing:
+The tracked split static library lets DevEco build without Rust/Cargo on the developer machine; CMake reconstructs the full archive locally when needed. If the Rust native core changes, rebuild it before committing:
 
 ```bash
 cd native-core
@@ -22,6 +22,7 @@ OHOS_NATIVE_HOME=/path/to/openharmony/native ./build-ohos.sh
 For GitHub releases, also produce a standalone native-core artifact:
 
 ```bash
+bash scripts/verify-native-core-artifact.sh
 bash scripts/package-native-core-artifact.sh
 ```
 
@@ -36,6 +37,7 @@ The artifact can be restored into a checkout with:
 
 ```bash
 bash scripts/install-native-core-artifact.sh /path/to/clashhm-native-core-ohos-arm64-*.tar.gz
+bash scripts/verify-native-core-artifact.sh
 ```
 
 ## Pre-Release Validation
@@ -44,6 +46,7 @@ Run before tagging a release:
 
 ```bash
 cargo test --manifest-path native-core/Cargo.toml --features shoes-backend
+bash scripts/verify-native-core-artifact.sh
 ```
 
 Then validate in DevEco Studio on a real device:
@@ -80,9 +83,9 @@ Unsupported protocols must produce clear diagnostics instead of silent fallback.
 ## GitHub Hygiene
 
 - Do not commit HAP outputs or `build/` directories.
-- Keep `clash/src/main/cpp/native-core/libclashhm_native_core.a` only while DevEco no-Rust builds need a checked-in artifact.
+- Keep only split `libclashhm_native_core.a.partNN` files in Git; do not track the reconstructed full `.a`.
 - Publish `scripts/package-native-core-artifact.sh` output with release builds.
-- Move the static library out of Git history and into Git LFS or release artifacts once the native-core ABI stabilizes.
+- Move the split static library out of Git history and into Git LFS or release artifacts once the native-core ABI stabilizes.
 - Keep README focused on app usage and current support status.
 - Keep implementation details in `docs/`.
 

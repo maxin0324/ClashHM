@@ -66,7 +66,9 @@ impl InitialHopEntry {
     pub fn supports_udp(&self) -> bool {
         match self {
             InitialHopEntry::Direct(_) => true, // Direct always supports UDP
-            InitialHopEntry::Proxy { proxy, .. } => proxy.supports_udp_over_tcp(),
+            InitialHopEntry::Proxy { socket, proxy } => {
+                socket.supports_proxy_udp() || proxy.supports_udp_over_tcp()
+            }
         }
     }
 }
@@ -376,8 +378,14 @@ impl ClientProxyChain {
                         proxy.proxy_location()
                     );
                     let proxy_loc = proxy.proxy_location().into();
-                    let stream = socket.connect(resolver, &proxy_loc).await?;
-                    proxy.setup_udp_bidirectional(stream, target).await
+                    if socket.supports_proxy_udp() {
+                        socket
+                            .connect_proxy_udp_bidirectional(resolver, &proxy_loc, target)
+                            .await
+                    } else {
+                        let stream = socket.connect(resolver, &proxy_loc).await?;
+                        proxy.setup_udp_bidirectional(stream, target).await
+                    }
                 }
             }
         } else {

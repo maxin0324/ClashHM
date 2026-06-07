@@ -36,5 +36,9 @@ OUT_DIR="$ROOT_DIR/clash/src/main/cpp/native-core"
 mkdir -p "$OUT_DIR"
 cp "$LIB" "$OUT_DIR/libclashhm_native_core.a"
 cp "$HEADER" "$OUT_DIR/native_core.h"
+rm -f "$OUT_DIR/libclashhm_native_core.a.part"*
+split -b "${CLASHHM_NATIVE_CORE_PART_SIZE:-32m}" -d -a 2 \
+  "$OUT_DIR/libclashhm_native_core.a" \
+  "$OUT_DIR/libclashhm_native_core.a.part"
 
 echo "Installed native-core artifact to $OUT_DIR"

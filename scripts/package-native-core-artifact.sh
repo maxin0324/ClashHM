@@ -21,6 +21,8 @@ EOF
   exit 2
 fi
 
+"$ROOT_DIR/scripts/verify-native-core-artifact.sh" >/dev/null
+
 mkdir -p "$ARTIFACT_DIR"
 VERSION="$(grep -m1 '^version = ' "$ROOT_DIR/native-core/Cargo.toml" | sed -E 's/version = "([^"]+)"/\1/')"
 GIT_REV="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"

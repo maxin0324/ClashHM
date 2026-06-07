@@ -8,20 +8,27 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::future;
 use log::{debug, error};
 use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
+use tokio::time::timeout;
 
 use crate::address::{NetLocation, ResolvedLocation};
 use crate::async_stream::AsyncStream;
-use crate::config::{ClientConfig, ClientQuicConfig, Transport};
+use crate::config::{ClientConfig, ClientProxyConfig, ClientQuicConfig, Transport};
+use crate::hysteria2_udp_stream::Hysteria2UdpMessageStream;
+use crate::option_util::NoneOrSome;
 use crate::quic_stream::QuicStream;
 use crate::resolver::{Resolver, resolve_addresses, resolve_location};
 use crate::rustls_config_util::create_client_config;
 use crate::socket_util::{new_tcp_socket, new_udp_socket, set_tcp_keepalive};
 use crate::thread_util::get_num_threads;
+use crate::tuic_udp_stream::TuicUdpMessageStream;
+use crate::uuid_util::parse_uuid;
 
 use super::socket_connector::SocketConnector;
 
@@ -36,7 +43,29 @@ enum TransportConfig {
         sni_hostname: Option<String>,
         endpoints: Vec<Arc<quinn::Endpoint>>,
         next_endpoint_index: AtomicU8,
+        quic_auth: Option<QuicAuthConfig>,
     },
+}
+
+#[derive(Debug, Clone)]
+enum QuicAuthConfig {
+    Hysteria2 {
+        password: String,
+        udp_enabled: bool,
+    },
+    TuicV5 {
+        uuid: Box<[u8]>,
+        password: String,
+    },
+}
+
+impl QuicAuthConfig {
+    fn enable_datagram(&self) -> bool {
+        match self {
+            QuicAuthConfig::Hysteria2 { udp_enabled, .. } => *udp_enabled,
+            QuicAuthConfig::TuicV5 { .. } => true,
+        }
+    }
 }
 
 /// Implementation of SocketConnector for TCP and QUIC transports.
@@ -71,8 +100,32 @@ impl SocketConnectorImpl {
         let default_sni_hostname =
             target_address.and_then(|addr| addr.address().hostname().map(ToString::to_string));
 
-        // Direct protocol only supports TCP (no proxy server to connect via QUIC)
-        let effective_transport = if config.protocol.is_direct() {
+        let quic_auth = match &config.protocol {
+            ClientProxyConfig::Hysteria2 {
+                password,
+                udp_enabled,
+            } => Some(QuicAuthConfig::Hysteria2 {
+                password: password.clone(),
+                udp_enabled: *udp_enabled,
+            }),
+            ClientProxyConfig::TuicV5 { uuid, password } => Some(QuicAuthConfig::TuicV5 {
+                uuid: match parse_uuid(uuid) {
+                    Ok(uuid) => uuid.into_boxed_slice(),
+                    Err(e) => {
+                        error!("Invalid TUIC UUID: {e}");
+                        return None;
+                    }
+                },
+                password: password.clone(),
+            }),
+            _ => None,
+        };
+
+        // Direct protocol only supports TCP (no proxy server to connect via QUIC).
+        // Hysteria2/TUIC are always QUIC even if the generated client config omits transport.
+        let effective_transport = if quic_auth.is_some() {
+            &Transport::Quic
+        } else if config.protocol.is_direct() {
             &Transport::Tcp
         } else {
             &config.transport
@@ -93,6 +146,11 @@ impl SocketConnectorImpl {
                     "QUIC transport requires target_address (direct protocol should use TCP)",
                 );
 
+                let mut quic_config = config.quic_settings.clone().unwrap_or_default();
+                if quic_auth.is_some() && quic_config.alpn_protocols.is_unspecified() {
+                    quic_config.alpn_protocols = NoneOrSome::One("h3".to_string());
+                }
+
                 let ClientQuicConfig {
                     verify,
                     server_fingerprints,
@@ -100,7 +158,7 @@ impl SocketConnectorImpl {
                     sni_hostname,
                     key,
                     cert,
-                } = config.quic_settings.clone().unwrap_or_default();
+                } = quic_config;
 
                 let sni_hostname = if sni_hostname.is_unspecified() {
                     if let Some(ref hostname) = default_sni_hostname {
@@ -186,6 +244,7 @@ impl SocketConnectorImpl {
                     sni_hostname,
                     endpoints,
                     next_endpoint_index: AtomicU8::new(0),
+                    quic_auth,
                 }
             }
         };
@@ -206,6 +265,90 @@ impl SocketConnectorImpl {
             transport: TransportConfig::Tcp { no_delay },
         }
     }
+}
+
+async fn authenticate_quic_connection(
+    connection: quinn::Connection,
+    auth: &QuicAuthConfig,
+) -> std::io::Result<()> {
+    match auth {
+        QuicAuthConfig::Hysteria2 { .. } => authenticate_hysteria2_connection(connection, auth).await,
+        QuicAuthConfig::TuicV5 { uuid, password } => {
+            let mut token = [0u8; 32];
+            connection
+                .export_keying_material(&mut token, uuid.as_ref(), password.as_bytes())
+                .map_err(|e| {
+                    std::io::Error::other(format!(
+                        "TUIC export keying material failed: {e:?}"
+                    ))
+                })?;
+
+            let mut stream = connection
+                .open_uni()
+                .await
+                .map_err(|e| std::io::Error::other(format!("TUIC auth stream failed: {e}")))?;
+            stream.write_all(&[5, 0]).await?;
+            stream.write_all(uuid.as_ref()).await?;
+            stream.write_all(&token).await?;
+            stream.finish().map_err(|e| {
+                std::io::Error::other(format!("TUIC auth finish failed: {e}"))
+            })?;
+            Ok(())
+        }
+    }
+}
+
+async fn authenticate_hysteria2_connection(
+    connection: quinn::Connection,
+    auth: &QuicAuthConfig,
+) -> std::io::Result<()> {
+    let QuicAuthConfig::Hysteria2 {
+        password,
+        udp_enabled,
+    } = auth
+    else {
+        unreachable!("Hysteria2 auth helper called with non-Hysteria2 auth config");
+    };
+
+    let h3_quic_connection = h3_quinn::Connection::new(connection);
+    let (mut h3_conn, mut send_request) = h3::client::builder()
+        .enable_datagram(*udp_enabled)
+        .build::<_, _, bytes::Bytes>(h3_quic_connection)
+        .await
+        .map_err(|e| std::io::Error::other(format!("Hysteria2 H3 setup failed: {e}")))?;
+
+    tokio::spawn(async move {
+        let _ = future::poll_fn(|cx| h3_conn.poll_close(cx)).await;
+    });
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("https://hysteria/auth")
+        .header("hysteria-auth", password.as_str())
+        .body(())
+        .map_err(|e| std::io::Error::other(format!("Hysteria2 auth request failed: {e}")))?;
+
+    let mut stream = send_request
+        .send_request(request)
+        .await
+        .map_err(|e| std::io::Error::other(format!("Hysteria2 auth send failed: {e}")))?;
+    stream
+        .finish()
+        .await
+        .map_err(|e| std::io::Error::other(format!("Hysteria2 auth finish failed: {e}")))?;
+
+    let response = timeout(Duration::from_secs(3), stream.recv_response())
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "Hysteria2 auth timed out"))?
+        .map_err(|e| std::io::Error::other(format!("Hysteria2 auth response failed: {e}")))?;
+
+    if response.status().as_u16() != 233 {
+        return Err(std::io::Error::other(format!(
+            "Hysteria2 auth rejected: status={}",
+            response.status()
+        )));
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -259,6 +402,7 @@ impl SocketConnector for SocketConnectorImpl {
                 endpoints,
                 next_endpoint_index,
                 sni_hostname,
+                quic_auth,
             } => {
                 let domain = match sni_hostname {
                     Some(s) => s.as_str(),
@@ -276,21 +420,34 @@ impl SocketConnector for SocketConnectorImpl {
 
                     match endpoint.connect(*target_addr, domain) {
                         Ok(connecting) => match connecting.await {
-                            Ok(conn) => match conn.open_bi().await {
-                                Ok((send, recv)) => {
-                                    if i > 0 {
-                                        debug!(
-                                            "QUIC connect succeeded on address #{} ({}) after {} failures",
-                                            i, target_addr, i
-                                        );
-                                    }
-                                    return Ok(Box::new(QuicStream::from(send, recv)));
+                            Ok(conn) => {
+                                if let Some(auth) = quic_auth
+                                    && let Err(e) =
+                                        authenticate_quic_connection(conn.clone(), auth).await
+                                {
+                                    debug!(
+                                        "QUIC auth to {} failed: {}, trying next",
+                                        target_addr, e
+                                    );
+                                    last_err = Some(e);
+                                    continue;
                                 }
-                                Err(e) => {
-                                    debug!("QUIC open_bi to {} failed: {}", target_addr, e);
-                                    last_err = Some(std::io::Error::other(format!(
-                                        "Failed to open QUIC stream: {e}"
-                                    )));
+                                match conn.open_bi().await {
+                                    Ok((send, recv)) => {
+                                        if i > 0 {
+                                            debug!(
+                                                "QUIC connect succeeded on address #{} ({}) after {} failures",
+                                                i, target_addr, i
+                                            );
+                                        }
+                                        return Ok(Box::new(QuicStream::from(send, recv)));
+                                    }
+                                    Err(e) => {
+                                        debug!("QUIC open_bi to {} failed: {}", target_addr, e);
+                                        last_err = Some(std::io::Error::other(format!(
+                                            "Failed to open QUIC stream: {e}"
+                                        )));
+                                    }
                                 }
                             },
                             Err(e) => {
@@ -312,6 +469,86 @@ impl SocketConnector for SocketConnectorImpl {
                     .unwrap_or_else(|| std::io::Error::other("no resolved addresses succeeded")))
             }
         }
+    }
+
+    async fn connect_proxy_udp_bidirectional(
+        &self,
+        resolver: &Arc<dyn Resolver>,
+        proxy: &ResolvedLocation,
+        target: ResolvedLocation,
+    ) -> std::io::Result<Box<dyn crate::async_stream::AsyncMessageStream>> {
+        let TransportConfig::Quic {
+            endpoints,
+            next_endpoint_index,
+            sni_hostname,
+            quic_auth: Some(auth),
+        } = &self.transport
+        else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "socket connector does not support proxy UDP",
+            ));
+        };
+
+        let proxy_addrs = match proxy.resolved_addr() {
+            Some(r) => vec![r],
+            None => resolve_addresses(resolver, proxy.location()).await?,
+        };
+        let domain = match sni_hostname {
+            Some(s) => s.as_str(),
+            None => proxy.location().address().hostname().unwrap_or("example.com"),
+        };
+
+        let mut last_err = None;
+        for proxy_addr in proxy_addrs {
+            let endpoint = if endpoints.len() == 1 {
+                &endpoints[0]
+            } else {
+                let idx = next_endpoint_index.fetch_add(1, Ordering::Relaxed) as usize;
+                &endpoints[idx % endpoints.len()]
+            };
+            match endpoint.connect(proxy_addr, domain) {
+                Ok(connecting) => match connecting.await {
+                    Ok(conn) => {
+                        if let Err(e) = authenticate_quic_connection(conn.clone(), auth).await {
+                            last_err = Some(e);
+                            continue;
+                        }
+                        let target = target.location().clone();
+                        return match auth {
+                            QuicAuthConfig::Hysteria2 { .. } => {
+                                Ok(Box::new(Hysteria2UdpMessageStream::new(conn, target)?))
+                            }
+                            QuicAuthConfig::TuicV5 { .. } => {
+                                Ok(Box::new(TuicUdpMessageStream::new(conn, target)?))
+                            }
+                        };
+                    }
+                    Err(e) => {
+                        last_err = Some(std::io::Error::other(format!(
+                            "QUIC proxy UDP connection failed: {e}"
+                        )));
+                    }
+                },
+                Err(e) => {
+                    last_err = Some(std::io::Error::other(format!(
+                        "QUIC proxy UDP connect failed: {e}"
+                    )));
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| std::io::Error::other("no proxy UDP address succeeded")))
+    }
+
+    fn supports_proxy_udp(&self) -> bool {
+        matches!(
+            self.transport,
+            TransportConfig::Quic {
+                quic_auth: Some(QuicAuthConfig::Hysteria2 { .. } | QuicAuthConfig::TuicV5 { .. }),
+                ..
+            }
+        )
     }
 
     async fn connect_udp_bidirectional(

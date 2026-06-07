@@ -55,6 +55,25 @@ pub trait SocketConnector: Send + Sync + Debug {
         target: ResolvedLocation,
     ) -> std::io::Result<Box<dyn AsyncMessageStream>>;
 
+    /// Create a UDP message stream through a proxy whose transport is owned by
+    /// the socket connector itself, such as QUIC datagram based protocols.
+    async fn connect_proxy_udp_bidirectional(
+        &self,
+        _resolver: &Arc<dyn Resolver>,
+        _proxy: &ResolvedLocation,
+        _target: ResolvedLocation,
+    ) -> std::io::Result<Box<dyn AsyncMessageStream>> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "socket connector does not support proxy UDP",
+        ))
+    }
+
+    /// Returns true when `connect_proxy_udp_bidirectional` can be used.
+    fn supports_proxy_udp(&self) -> bool {
+        false
+    }
+
     /// Returns the bind interface configured for this socket connector, if any.
     fn bind_interface(&self) -> Option<&str>;
 }

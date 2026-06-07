@@ -360,6 +360,17 @@ pub enum ClientProxyConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         h2mux: Option<H2MuxConfig>,
     },
+    #[serde(alias = "hy2", alias = "hysteria")]
+    Hysteria2 {
+        password: String,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        udp_enabled: bool,
+    },
+    #[serde(alias = "tuic", alias = "tuic-v5", alias = "tuicv5")]
+    TuicV5 {
+        uuid: String,
+        password: String,
+    },
     Reality {
         public_key: String,
         #[serde(default = "default_reality_client_short_id")]
@@ -456,6 +467,8 @@ impl ClientProxyConfig {
             ClientProxyConfig::Snell { .. } => "Snell",
             ClientProxyConfig::Vless { .. } => "VLESS",
             ClientProxyConfig::Trojan { .. } => "Trojan",
+            ClientProxyConfig::Hysteria2 { .. } => "Hysteria2",
+            ClientProxyConfig::TuicV5 { .. } => "TUIC",
             ClientProxyConfig::Reality { .. } => "Reality",
             ClientProxyConfig::Tls(..) => "TLS",
             ClientProxyConfig::ShadowTls { .. } => "ShadowTLS",

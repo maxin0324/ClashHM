@@ -265,10 +265,21 @@ rules:
           currentGroup = null;
         }
         readingGroupProxies = false;
-        if (trimmed === 'proxies:') {
+        if (trimmed.startsWith('proxies:')) {
+          this.addInlineProxyNodes(trimmed, nodesByName);
           section = 'proxies';
-        } else if (trimmed === 'proxy-groups:') {
+          if (trimmed !== 'proxies:') {
+            section = '';
+          }
+        } else if (trimmed.startsWith('proxy-groups:')) {
+          const inlineGroups = this.parseInlineProxyGroups(trimmed);
+          for (const group of inlineGroups) {
+            groups.push(group);
+          }
           section = 'proxy-groups';
+          if (trimmed !== 'proxy-groups:') {
+            section = '';
+          }
         } else {
           section = '';
         }
@@ -353,6 +364,36 @@ rules:
     return groups.filter((group: ProxyGroup) => group.all.length > 0 || group.nodes.length > 0);
   }
 
+  private addInlineProxyNodes(line: string, nodesByName: Map<string, ProxyNode>): void {
+    const items = this.parseTopLevelFlowObjects(line);
+    for (const item of items) {
+      const name = this.parseFlowValue(item, 'name');
+      if (!name) {
+        continue;
+      }
+      const node = this.createProxyNode(name, this.parseFlowValue(item, 'type'));
+      node.server = this.parseFlowValue(item, 'server');
+      node.port = this.parseNumber(this.parseFlowValue(item, 'port'));
+      nodesByName.set(node.name, node);
+    }
+  }
+
+  private parseInlineProxyGroups(line: string): ProxyGroup[] {
+    const groups: ProxyGroup[] = [];
+    const items = this.parseTopLevelFlowObjects(line);
+    for (const item of items) {
+      const name = this.parseFlowValue(item, 'name');
+      if (!name) {
+        continue;
+      }
+      const group = this.createProxyGroup(name, this.parseFlowValue(item, 'type'));
+      group.all = this.parseFlowList(item, 'proxies');
+      group.now = this.parseFlowValue(item, 'now') || (group.all.length > 0 ? group.all[0] : '');
+      groups.push(group);
+    }
+    return groups;
+  }
+
   private isTopLevel(line: string): boolean {
     return line.length > 0 && line[0] !== ' ' && line[0] !== '\t' && !line.startsWith('-');
   }
@@ -384,6 +425,16 @@ rules:
         }
         current = new ProviderConfig();
         current.name = this.stripQuotes(trimmed.substring(0, trimmed.length - 1));
+      } else if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.indexOf(':') > 0 && trimmed.indexOf('{') > 0) {
+        if (current) {
+          result.push(current);
+        }
+        current = new ProviderConfig();
+        current.name = this.stripQuotes(trimmed.substring(0, trimmed.indexOf(':')).trim());
+        const inlinePath = this.parseFlowValue(trimmed, 'path');
+        if (inlinePath) {
+          current.path = this.resolveProviderPath(subscriptionPath, inlinePath);
+        }
       } else if (current && trimmed.startsWith('path:')) {
         current.path = this.resolveProviderPath(subscriptionPath, this.stripQuotes(trimmed.substring(5).trim()));
       }
@@ -421,6 +472,20 @@ rules:
         }
         current = new RuleProviderConfig();
         current.name = this.stripQuotes(trimmed.substring(0, trimmed.length - 1));
+      } else if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.indexOf(':') > 0 && trimmed.indexOf('{') > 0) {
+        if (current) {
+          result.push(current);
+        }
+        current = new RuleProviderConfig();
+        current.name = this.stripQuotes(trimmed.substring(0, trimmed.indexOf(':')).trim());
+        const inlinePath = this.parseFlowValue(trimmed, 'path');
+        const inlineBehavior = this.parseFlowValue(trimmed, 'behavior');
+        if (inlinePath) {
+          current.path = this.resolveProviderPath(subscriptionPath, inlinePath);
+        }
+        if (inlineBehavior) {
+          current.behavior = inlineBehavior.toLowerCase();
+        }
       } else if (current && trimmed.startsWith('path:')) {
         current.path = this.resolveProviderPath(subscriptionPath, this.stripQuotes(trimmed.substring(5).trim()));
       } else if (current && trimmed.startsWith('behavior:')) {
@@ -456,12 +521,35 @@ rules:
     for (const line of lines) {
       const trimmed = line.trim();
       const topLevel = this.isTopLevel(line);
+      if (!section && trimmed.startsWith('- ')) {
+        if (currentNodeLines.length > 0) {
+          this.pushProviderNode(provider, currentNodeLines);
+        }
+        currentNodeLines = [`  ${trimmed}`];
+        continue;
+      }
+      if (!section && currentNodeLines.length > 0 && (line.startsWith(' ') || line.startsWith('\t'))) {
+        currentNodeLines.push(line.startsWith('  ') ? line : `  ${trimmed}`);
+        continue;
+      }
       if (topLevel) {
         if (currentNodeLines.length > 0) {
           this.pushProviderNode(provider, currentNodeLines);
           currentNodeLines = [];
         }
-        section = trimmed === 'proxies:' ? 'proxies' : '';
+        if (trimmed.startsWith('proxies:')) {
+          section = 'proxies';
+          const inlineItems = this.parseTopLevelFlowObjects(trimmed);
+          for (const item of inlineItems) {
+            const nodeLines = [`  - ${item}`];
+            this.pushProviderNode(provider, nodeLines);
+          }
+          if (trimmed !== 'proxies:') {
+            section = '';
+          }
+        } else {
+          section = '';
+        }
         continue;
       }
       if (section !== 'proxies') {
@@ -523,6 +611,14 @@ rules:
       if (topLevel) {
         if (trimmed === 'payload:' || trimmed === 'rules:') {
           section = trimmed.substring(0, trimmed.length - 1);
+        } else if (trimmed.startsWith('payload:') || trimmed.startsWith('rules:')) {
+          const split = trimmed.indexOf(':');
+          section = trimmed.substring(0, split);
+          const inlineValue = trimmed.substring(split + 1).trim();
+          const inlineEntries = this.parseInlineRuleProviderEntries(inlineValue);
+          for (const entry of inlineEntries) {
+            entries.push(entry);
+          }
         } else {
           section = '';
         }
@@ -534,6 +630,11 @@ rules:
           if (value) {
             entries.push(value);
           }
+        }
+      } else if (!section && trimmed.startsWith('- ')) {
+        const value = this.stripQuotes(trimmed.substring(2).trim());
+        if (value) {
+          entries.push(value);
         }
       }
     }
@@ -550,19 +651,89 @@ rules:
     return entries;
   }
 
+  private parseInlineRuleProviderEntries(value: string): string[] {
+    const text = value.trim();
+    if (!text) {
+      return [];
+    }
+    if (text.startsWith('[') && text.endsWith(']')) {
+      const parts = this.splitFlowListItems(text.substring(1, text.length - 1));
+      const entries: string[] = [];
+      for (const part of parts) {
+        const entry = this.stripQuotes(part.trim());
+        if (entry) {
+          entries.push(entry);
+        }
+      }
+      return entries;
+    }
+    const single = this.stripQuotes(text);
+    return single ? [single] : [];
+  }
+
+  private parseTopLevelFlowObjects(line: string): string[] {
+    const open = line.indexOf('[');
+    if (open < 0) {
+      return [];
+    }
+    let close = -1;
+    let quote = '';
+    let depth = 0;
+    for (let i = open; i < line.length; i++) {
+      const ch = line.charAt(i);
+      if ((ch === '"' || ch === "'") && quote === '') {
+        quote = ch;
+        continue;
+      }
+      if (quote !== '' && ch === quote) {
+        quote = '';
+        continue;
+      }
+      if (quote === '') {
+        if (ch === '[') {
+          depth++;
+        } else if (ch === ']') {
+          depth--;
+          if (depth === 0) {
+            close = i;
+            break;
+          }
+        }
+      }
+    }
+    if (close < 0) {
+      return [];
+    }
+    const items = this.splitFlowListItems(line.substring(open + 1, close));
+    const result: string[] = [];
+    for (const item of items) {
+      const trimmed = item.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        result.push(trimmed);
+      }
+    }
+    return result;
+  }
+
   private convertRuleProviderEntry(entry: string, behavior: string): string {
     const value = this.stripQuotes(entry.trim());
     if (!value || value.startsWith('#')) {
       return '';
     }
+    const parts = this.splitRuleParts(value);
+    if (parts.length >= 2) {
+      const explicitRuleType = parts[0].toUpperCase();
+      if (this.isSupportedExpandedRuleType(explicitRuleType)) {
+        return `${explicitRuleType},${parts[1]}`;
+      }
+    }
     if (behavior === 'domain') {
-      return `DOMAIN-SUFFIX,${this.normalizeDomainRuleValue(value)}`;
+      return this.convertDomainProviderEntry(value);
     }
     if (behavior === 'ipcidr' || behavior === 'ip-cidr') {
       const ruleType = value.indexOf(':') >= 0 ? 'IP-CIDR6' : 'IP-CIDR';
       return `${ruleType},${value}`;
     }
-    const parts = this.splitRuleParts(value);
     if (parts.length < 2) {
       return '';
     }
@@ -571,6 +742,23 @@ rules:
       return `${ruleType},${parts[1]}`;
     }
     return '';
+  }
+
+  private convertDomainProviderEntry(value: string): string {
+    const lower = value.toLowerCase();
+    let ruleType = 'DOMAIN-SUFFIX';
+    let payload = value;
+    if (lower.startsWith('domain:')) {
+      payload = value.substring(7);
+    } else if (lower.startsWith('full:')) {
+      ruleType = 'DOMAIN';
+      payload = value.substring(5);
+    } else if (lower.startsWith('keyword:')) {
+      ruleType = 'DOMAIN-KEYWORD';
+      payload = value.substring(8);
+    }
+    payload = this.normalizeDomainRuleValue(payload);
+    return payload ? `${ruleType},${payload}` : '';
   }
 
   private normalizeDomainRuleValue(value: string): string {
@@ -585,7 +773,8 @@ rules:
 
   private isSupportedExpandedRuleType(ruleType: string): boolean {
     return ruleType === 'DOMAIN' || ruleType === 'DOMAIN-SUFFIX' || ruleType === 'IP-CIDR' ||
-      ruleType === 'IP-CIDR6' || ruleType === 'DST-PORT';
+      ruleType === 'IP-CIDR6' || ruleType === 'DST-PORT' || ruleType === 'DOMAIN-KEYWORD' ||
+      ruleType === 'GEOIP' || ruleType === 'GEOSITE';
   }
 
   private splitRuleParts(value: string): string[] {

@@ -223,6 +223,10 @@ fn proxy_from_flow(line: &str) -> Option<ProxyNode> {
         "port",
         "cipher",
         "password",
+        "auth",
+        "auth-str",
+        "auth_str",
+        "token",
         "username",
         "uuid",
         "sni",
@@ -249,13 +253,20 @@ fn proxy_from_flow(line: &str) -> Option<ProxyNode> {
         "shadowtls-password",
         "shadow-tls-sni",
         "shadowtls-sni",
+        "obfs",
+        "obfs-password",
+        "obfs_password",
+        "congestion-controller",
+        "congestion_controller",
+        "disable-sni",
+        "disable_sni",
     ] {
         let value = flow_value(line, key);
         if !value.is_empty() {
             if key == "Host" {
                 assign_proxy_field(&mut proxy, "ws-host", value);
             } else {
-                assign_proxy_field(&mut proxy, key, value);
+                assign_proxy_field_normalized(&mut proxy, key, value);
             }
         }
     }
@@ -368,6 +379,19 @@ fn assign_proxy_field(proxy: &mut ProxyNode, key: &str, value: String) {
         proxy.proxy_type = value.clone();
     }
     proxy.fields.insert(key.to_string(), value);
+}
+
+fn assign_proxy_field_normalized(proxy: &mut ProxyNode, key: &str, value: String) {
+    match key {
+        "auth" | "auth-str" | "auth_str" => assign_proxy_field(proxy, "password", value),
+        "token" => assign_proxy_field(proxy, "password", value),
+        "obfs-password" | "obfs_password" => assign_proxy_field(proxy, "obfs-password", value),
+        "congestion-controller" | "congestion_controller" => {
+            assign_proxy_field(proxy, "congestion-controller", value)
+        }
+        "disable-sni" | "disable_sni" => assign_proxy_field(proxy, "disable-sni", value),
+        _ => assign_proxy_field(proxy, key, value),
+    }
 }
 
 fn block_key_value(line: &str) -> Option<(String, String)> {
@@ -585,6 +609,10 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "port",
         "cipher",
         "password",
+        "auth",
+        "auth-str",
+        "auth_str",
+        "token",
         "username",
         "uuid",
         "sni",
@@ -624,6 +652,13 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "shadowtls-password",
         "shadow-tls-sni",
         "shadowtls-sni",
+        "obfs",
+        "obfs-password",
+        "obfs_password",
+        "congestion-controller",
+        "congestion_controller",
+        "disable-sni",
+        "disable_sni",
     ];
     for key in direct_keys {
         if let Some(value) = yaml_mapping_get(mapping, key) {
@@ -632,7 +667,7 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
                 if key == "Host" {
                     assign_proxy_field(&mut proxy, "ws-host", value);
                 } else {
-                    assign_proxy_field(&mut proxy, key, value);
+                    assign_proxy_field_normalized(&mut proxy, key, value);
                 }
             }
         }
@@ -698,12 +733,9 @@ fn group_from_yaml(
 fn rule_provider_entries_from_yaml(value: &serde_yaml::Value) -> Vec<String> {
     if let serde_yaml::Value::Mapping(mapping) = value {
         for key in ["payload", "rules"] {
-            if let Some(serde_yaml::Value::Sequence(items)) = yaml_mapping_get(mapping, key) {
-                return items
-                    .iter()
-                    .map(yaml_value_to_string)
-                    .filter(|item| !item.is_empty())
-                    .collect();
+            let entries = yaml_sequence_strings(yaml_mapping_get(mapping, key));
+            if !entries.is_empty() {
+                return entries;
             }
         }
     }
@@ -721,24 +753,72 @@ fn rule_provider_behavior_from_yaml(value: &serde_yaml::Value) -> String {
     "classical".to_string()
 }
 
+fn provider_rule_parts(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(trim_quote)
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+fn supported_expanded_rule_type(rule_type: &str) -> bool {
+    matches!(
+        rule_type,
+        "DOMAIN"
+            | "DOMAIN-SUFFIX"
+            | "DOMAIN-KEYWORD"
+            | "IP-CIDR"
+            | "IP-CIDR6"
+            | "DST-PORT"
+            | "GEOIP"
+            | "GEOSITE"
+    )
+}
+
+fn normalized_domain_provider_rule(value: &str, target: &str) -> Option<ClashRule> {
+    let lower = value.to_ascii_lowercase();
+    let (rule_type, raw_payload) = if lower.starts_with("domain:") {
+        ("DOMAIN-SUFFIX", &value[7..])
+    } else if lower.starts_with("full:") {
+        ("DOMAIN", &value[5..])
+    } else if lower.starts_with("keyword:") {
+        ("DOMAIN-KEYWORD", &value[8..])
+    } else {
+        ("DOMAIN-SUFFIX", value)
+    };
+    let payload = raw_payload
+        .trim()
+        .trim_start_matches("+.")
+        .trim_start_matches('.')
+        .to_string();
+    if payload.is_empty() {
+        return None;
+    }
+    Some(ClashRule {
+        rule_type: rule_type.to_string(),
+        payload,
+        target: target.to_string(),
+    })
+}
+
 fn rule_from_provider_entry(entry: &str, behavior: &str, target: &str) -> Option<ClashRule> {
     let value = trim_quote(entry.trim());
     if value.is_empty() || value.starts_with('#') || target.is_empty() {
         return None;
     }
-    if behavior == "domain" {
-        let payload = value
-            .trim_start_matches("+.")
-            .trim_start_matches('.')
-            .to_string();
-        if payload.is_empty() {
-            return None;
+    let parts = provider_rule_parts(&value);
+    if parts.len() >= 2 {
+        let rule_type = parts[0].to_uppercase();
+        if supported_expanded_rule_type(&rule_type) {
+            return Some(ClashRule {
+                rule_type,
+                payload: parts[1].clone(),
+                target: target.to_string(),
+            });
         }
-        return Some(ClashRule {
-            rule_type: "DOMAIN-SUFFIX".to_string(),
-            payload,
-            target: target.to_string(),
-        });
+    }
+    if behavior == "domain" {
+        return normalized_domain_provider_rule(&value, target);
     }
     if behavior == "ipcidr" || behavior == "ip-cidr" {
         return Some(ClashRule {
@@ -972,7 +1052,7 @@ fn parse_clash_config_fallback(config: &str) -> (Vec<ProxyNode>, Vec<ProxyGroup>
                     if !proxy_nested_section.is_empty() {
                         assign_proxy_nested_field(proxy, &proxy_nested_section, &key, value);
                     } else {
-                        assign_proxy_field(proxy, &key, value);
+                        assign_proxy_field_normalized(proxy, &key, value);
                     }
                 }
             }
@@ -1333,15 +1413,51 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
     let proxy_type = proxy.proxy_type.to_lowercase();
     let pad = protocol_indent(indent);
     if proxy_type == "hysteria2" || proxy_type == "hy2" || proxy_type == "hysteria" {
-        return Err(format!(
-            "proxy {} type {} is not supported: the vendored shoes backend currently has Hysteria2 server code but no client outbound config/handler",
-            proxy.name, proxy.proxy_type
+        let password = proxy_field(proxy, "password");
+        if password.is_empty() {
+            return Err(format!("hysteria2 proxy {} missing password", proxy.name));
+        }
+        let obfs = proxy_field(proxy, "obfs");
+        let obfs_password = proxy_field(proxy, "obfs-password");
+        if !obfs.is_empty() || !obfs_password.is_empty() {
+            return Err(format!(
+                "hysteria2 proxy {} uses obfs, which is not supported by the embedded HY2 adapter yet",
+                proxy.name
+            ));
+        }
+        if truthy(proxy_field(proxy, "disable-sni")) {
+            return Err(format!(
+                "hysteria2 proxy {} uses disable-sni, which is not supported by the embedded HY2 adapter yet",
+                proxy.name
+            ));
+        }
+        return Ok(format!(
+            "{pad}type: hysteria2\n{pad}password: {}\n{pad}udp_enabled: {}\n",
+            yaml_quote(password),
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         ));
     }
     if proxy_type == "tuic" || proxy_type == "tuic-v5" || proxy_type == "tuicv5" {
-        return Err(format!(
-            "proxy {} type {} is not supported: the vendored shoes backend currently has TUIC server code but no client outbound config/handler",
-            proxy.name, proxy.proxy_type
+        let uuid = proxy_field(proxy, "uuid");
+        let password = proxy_field(proxy, "password");
+        if uuid.is_empty() || password.is_empty() {
+            return Err(format!("tuic proxy {} missing uuid/password", proxy.name));
+        }
+        let congestion = proxy_field(proxy, "congestion-controller");
+        if !congestion.is_empty() && !congestion.eq_ignore_ascii_case("bbr") {
+            return Err(format!(
+                "tuic proxy {} congestion-controller {} is not supported by the embedded TUIC adapter yet",
+                proxy.name, congestion
+            ));
+        }
+        return Ok(format!(
+            "{pad}type: tuic\n{pad}uuid: {}\n{pad}password: {}\n",
+            yaml_quote(uuid),
+            yaml_quote(password)
         ));
     }
     if proxy_type == "direct" {
@@ -1798,10 +1914,62 @@ fn build_shoes_client_chain(proxy: &ProxyNode) -> Result<String, String> {
         return Err(format!("proxy {} missing server/port", proxy.name));
     }
     let protocol = build_proxy_protocol(proxy, 12)?;
-    Ok(format!(
+    let mut out = format!(
         "        - address: {}\n          protocol:\n{}",
         yaml_quote(&format!("{server}:{port}")),
         protocol
+    );
+    if proxy_requires_quic_transport(proxy) {
+        append_quic_client_settings(proxy, &mut out);
+    }
+    Ok(out)
+}
+
+fn proxy_requires_quic_transport(proxy: &ProxyNode) -> bool {
+    matches!(
+        proxy.proxy_type.to_ascii_lowercase().as_str(),
+        "hysteria2" | "hy2" | "hysteria" | "tuic" | "tuic-v5" | "tuicv5"
+    )
+}
+
+fn append_quic_client_settings(proxy: &ProxyNode, out: &mut String) {
+    out.push_str("          transport: quic\n");
+    let sni = proxy_field_any(
+        proxy,
+        &["sni", "servername", "server-name", "server_name", "host"],
+    );
+    let sni = if sni.is_empty() {
+        proxy_field(proxy, "server")
+    } else {
+        sni
+    };
+    let skip_verify = proxy_field(proxy, "skip-cert-verify");
+    let alpn = proxy_field(proxy, "alpn");
+    if skip_verify.is_empty() && sni.is_empty() && alpn.is_empty() {
+        return;
+    }
+    out.push_str("          quic_settings:\n");
+    if !skip_verify.is_empty() {
+        out.push_str(&format!(
+            "            verify: {}\n",
+            if truthy(skip_verify) { "false" } else { "true" }
+        ));
+    }
+    if !sni.is_empty() {
+        out.push_str(&format!("            sni_hostname: {}\n", yaml_quote(sni)));
+    }
+    if !alpn.is_empty() {
+        out.push_str(&format!(
+            "            alpn_protocols: {}\n",
+            yaml_quote(alpn)
+        ));
+    }
+}
+
+fn build_probe_client_group(proxy: &ProxyNode) -> Result<String, String> {
+    let chain = build_shoes_client_chain(proxy)?;
+    Ok(format!(
+        "- client_group: \"__clashhm_probe\"\n  client_proxies:\n{chain}"
     ))
 }
 
@@ -2453,6 +2621,127 @@ fn tcp_delay_ms(proxy: &ProxyNode, timeout_ms: i32) -> Result<i32, i32> {
     Ok(start.elapsed().as_millis().min(i32::MAX as u128) as i32)
 }
 
+struct DelayUrlTarget {
+    scheme: String,
+    host: String,
+    port: u16,
+    path_and_query: String,
+}
+
+fn parse_delay_url_target(url: &str) -> Result<DelayUrlTarget, i32> {
+    let normalized = if url.trim().is_empty() {
+        "https://www.gstatic.com/generate_204"
+    } else {
+        url.trim()
+    };
+    let (scheme, rest) = normalized
+        .split_once("://")
+        .ok_or(-7)
+        .map(|(scheme, rest)| (scheme.to_ascii_lowercase(), rest))?;
+    let authority_end = rest
+        .find(|ch| matches!(ch, '/' | '?' | '#'))
+        .unwrap_or(rest.len());
+    let mut authority = &rest[..authority_end];
+    let path_and_query = if authority_end < rest.len() {
+        let suffix = &rest[authority_end..];
+        if suffix.starts_with('?') {
+            format!("/{suffix}")
+        } else if suffix.starts_with('#') {
+            "/".to_string()
+        } else {
+            let without_fragment = suffix.split('#').next().unwrap_or("/");
+            if without_fragment.is_empty() {
+                "/".to_string()
+            } else {
+                without_fragment.to_string()
+            }
+        }
+    } else {
+        "/".to_string()
+    };
+    if let Some((_, host_part)) = authority.rsplit_once('@') {
+        authority = host_part;
+    }
+    if authority.is_empty() {
+        return Err(-7);
+    }
+    let default_port = match scheme.as_str() {
+        "https" => 443,
+        "http" => 80,
+        _ => return Err(-7),
+    };
+
+    if let Some(stripped) = authority.strip_prefix('[') {
+        let Some(end) = stripped.find(']') else {
+            return Err(-7);
+        };
+        let host = &stripped[..end];
+        let rest = &stripped[end + 1..];
+        let port = if let Some(port) = rest.strip_prefix(':') {
+            port.parse::<u16>().map_err(|_| -7)?
+        } else if rest.is_empty() {
+            default_port
+        } else {
+            return Err(-7);
+        };
+        if host.is_empty() {
+            return Err(-7);
+        }
+        return Ok(DelayUrlTarget {
+            scheme,
+            host: host.to_string(),
+            port,
+            path_and_query,
+        });
+    }
+
+    let (host, port) = if let Some((host, port)) = authority.rsplit_once(':') {
+        if host.contains(':') {
+            (authority, default_port)
+        } else {
+            (host, port.parse::<u16>().map_err(|_| -7)?)
+        }
+    } else {
+        (authority, default_port)
+    };
+    if host.is_empty() {
+        return Err(-7);
+    }
+    Ok(DelayUrlTarget {
+        scheme,
+        host: host.to_string(),
+        port,
+        path_and_query,
+    })
+}
+
+#[cfg(feature = "shoes-backend")]
+fn proxy_delay_ms(proxy: &ProxyNode, url: &str, timeout_ms: i32) -> Result<i32, i32> {
+    let target = parse_delay_url_target(url)?;
+    let client_group_yaml = build_probe_client_group(proxy).map_err(|_| -8)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| -9)?;
+    let elapsed = runtime
+        .block_on(shoes::probe::http_url_test_delay_ms(
+            &client_group_yaml,
+            "__clashhm_probe",
+            &target.scheme,
+            &target.host,
+            target.port,
+            &target.path_and_query,
+            timeout_ms.max(1) as u64,
+        ))
+        .map_err(|_| -6)?;
+    Ok(elapsed.min(i32::MAX as u128) as i32)
+}
+
+#[cfg(not(feature = "shoes-backend"))]
+fn proxy_delay_ms(proxy: &ProxyNode, _url: &str, timeout_ms: i32) -> Result<i32, i32> {
+    tcp_delay_ms(proxy, timeout_ms)
+}
+
 fn proxies_json(
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
@@ -2696,12 +2985,13 @@ pub extern "C" fn clashhm_native_core_select_proxy(
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_test_delay(
     proxy_name: *const c_char,
-    _url: *const c_char,
+    url: *const c_char,
     timeout_ms: c_int,
 ) -> c_int {
     let Ok(proxy_name) = cstr_to_string(proxy_name) else {
         return -1;
     };
+    let url = cstr_to_string(url).unwrap_or_default();
     let guard = state().lock().unwrap();
     let proxy = if proxy_name.is_empty() {
         selected_proxy(&guard.groups, &guard.proxies)
@@ -2712,8 +3002,9 @@ pub extern "C" fn clashhm_native_core_test_delay(
         return -2;
     };
     let tested_proxy_name = proxy.name.clone();
-    let result = tcp_delay_ms(proxy, timeout_ms).unwrap_or_else(|code| code);
+    let tested_proxy = proxy.clone();
     drop(guard);
+    let result = proxy_delay_ms(&tested_proxy, &url, timeout_ms).unwrap_or_else(|code| code);
     let mut guard = state().lock().unwrap();
     guard.last_delay_ms = result;
     guard.delay_by_proxy.insert(tested_proxy_name, result);
@@ -2942,6 +3233,124 @@ rules:
     }
 
     #[test]
+    fn expands_mihomo_style_rule_provider_entries() {
+        let config = r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rule-providers:
+  domains:
+    type: inline
+    behavior: domain
+    payload:
+      - +.suffix.example.com
+      - DOMAIN,exact.example.com
+      - DOMAIN-KEYWORD,needle
+      - domain:prefixed.example.com
+      - full:full.example.com
+      - keyword:ads
+  cidrs:
+    type: inline
+    behavior: ipcidr
+    payload:
+      - 192.0.2.0/24
+      - IP-CIDR6,2001:db8::/32
+  classical:
+    type: inline
+    behavior: classical
+    payload:
+      - GEOIP,CN
+      - GEOSITE,google
+      - DOMAIN-KEYWORD,youtube
+rules:
+  - RULE-SET,domains,DIRECT
+  - RULE-SET,cidrs,DIRECT
+  - RULE-SET,classical,Proxy
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-SUFFIX" && rule.payload == "suffix.example.com"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN" && rule.payload == "exact.example.com"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-KEYWORD" && rule.payload == "needle"));
+        assert!(rules.iter().any(
+            |rule| rule.rule_type == "DOMAIN-SUFFIX" && rule.payload == "prefixed.example.com"
+        ));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN" && rule.payload == "full.example.com"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-KEYWORD" && rule.payload == "ads"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "IP-CIDR" && rule.payload == "192.0.2.0/24"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "IP-CIDR6" && rule.payload == "2001:db8::/32"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "GEOIP" && rule.payload == "CN"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "GEOSITE" && rule.payload == "google"));
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("masks: \"suffix.example.com\""));
+        assert!(shoes_config.contains("masks: \"exact.example.com\""));
+        assert!(shoes_config.contains("domain_keywords: \"needle\""));
+        assert!(shoes_config.contains("domain_keywords: \"ads\""));
+        assert!(shoes_config.contains("masks: \"192.0.2.0/24\""));
+        assert!(shoes_config.contains("geoip_countries: \"CN\""));
+        assert!(shoes_config.contains("\"google.com\""));
+    }
+
+    #[test]
+    fn expands_inline_flow_rule_provider_payloads() {
+        let config = r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [A] }
+rule-providers:
+  flow:
+    type: inline
+    behavior: classical
+    payload: ["DOMAIN-SUFFIX,flow.example.com", "DOMAIN-KEYWORD,flow-keyword"]
+  single:
+    type: inline
+    behavior: domain
+    rules: full:single.example.com
+rules:
+  - RULE-SET,flow,DIRECT
+  - RULE-SET,single,DIRECT
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-SUFFIX" && rule.payload == "flow.example.com"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-KEYWORD" && rule.payload == "flow-keyword"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN" && rule.payload == "single.example.com"));
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("masks: \"flow.example.com\""));
+        assert!(shoes_config.contains("domain_keywords: \"flow-keyword\""));
+        assert!(shoes_config.contains("masks: \"single.example.com\""));
+    }
+
+    #[test]
     fn builds_shoes_config_for_selected_shadowsocks() {
         let config = r#"
 proxies:
@@ -3100,6 +3509,46 @@ rules:
     }
 
     #[test]
+    fn parses_delay_url_target_defaults_and_ports() {
+        let default_target = parse_delay_url_target("").unwrap();
+        assert_eq!(default_target.scheme, "https");
+        assert_eq!(default_target.host, "www.gstatic.com");
+        assert_eq!(default_target.port, 443);
+        assert_eq!(default_target.path_and_query, "/generate_204");
+
+        let https_target = parse_delay_url_target("https://www.gstatic.com/generate_204").unwrap();
+        assert_eq!(https_target.host, "www.gstatic.com");
+        assert_eq!(https_target.port, 443);
+        assert_eq!(https_target.path_and_query, "/generate_204");
+
+        let http_target = parse_delay_url_target("http://example.com:8080/path?q=1#frag").unwrap();
+        assert_eq!(http_target.scheme, "http");
+        assert_eq!(http_target.host, "example.com");
+        assert_eq!(http_target.port, 8080);
+        assert_eq!(http_target.path_and_query, "/path?q=1");
+
+        let ipv6_target = parse_delay_url_target("https://[2001:db8::1]/").unwrap();
+        assert_eq!(ipv6_target.host, "2001:db8::1");
+        assert_eq!(ipv6_target.port, 443);
+        assert_eq!(ipv6_target.path_and_query, "/");
+    }
+
+    #[cfg(feature = "shoes-backend")]
+    #[test]
+    fn builds_probe_client_group_yaml() {
+        let mut fields = BTreeMap::new();
+        fields.insert("server".to_string(), "127.0.0.1".to_string());
+        fields.insert("port".to_string(), "1080".to_string());
+        let proxy = ProxyNode {
+            name: "Socks".to_string(),
+            proxy_type: "socks5".to_string(),
+            fields,
+        };
+        let yaml = build_probe_client_group(&proxy).unwrap();
+        assert!(shoes::config::load_config_str(&yaml).is_ok(), "{yaml}");
+    }
+
+    #[test]
     fn proxy_json_reports_cached_latency() {
         let proxies = vec![ProxyNode {
             name: "A".to_string(),
@@ -3152,10 +3601,10 @@ rules:
     }
 
     #[test]
-    fn rejects_unsupported_protocols_explicitly() {
+    fn generated_hysteria2_config_is_parseable_by_shoes() {
         let config = r#"
 proxies:
-  - { name: HY2, type: hysteria2, server: hy.example.com, port: 443, password: secret }
+  - { name: HY2, type: hysteria2, server: hy.example.com, port: 443, password: secret, sni: hy-sni.example.com, skip-cert-verify: true, alpn: h3 }
 proxy-groups:
   - name: Proxy
     type: select
@@ -3166,19 +3615,25 @@ rules:
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let result = build_shoes_tun_config(28, &groups, &proxies, &rules);
-        assert!(result.is_err());
-        let error = result.unwrap_err();
+        assert!(result.is_ok(), "{result:?}");
+        let yaml = result.unwrap();
+        assert!(yaml.contains("type: hysteria2"), "{yaml}");
+        assert!(yaml.contains("transport: quic"), "{yaml}");
+        assert!(yaml.contains("verify: false"), "{yaml}");
         assert!(
-            error.contains("Hysteria2 server code but no client outbound"),
-            "{error}"
+            yaml.contains("sni_hostname: \"hy-sni.example.com\""),
+            "{yaml}"
         );
+        assert!(yaml.contains("alpn_protocols: \"h3\""), "{yaml}");
+        #[cfg(feature = "shoes-backend")]
+        assert!(shoes::config::load_config_str(&yaml).is_ok(), "{yaml}");
     }
 
     #[test]
-    fn rejects_tuic_protocol_explicitly() {
+    fn generated_tuic_config_is_parseable_by_shoes() {
         let config = r#"
 proxies:
-  - { name: TUIC, type: tuic, server: tuic.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, password: secret }
+  - { name: TUIC, type: tuic, server: tuic.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, password: secret, sni: tuic-sni.example.com, skip-cert-verify: true, alpn: h3 }
 proxy-groups:
   - name: Proxy
     type: select
@@ -3189,12 +3644,133 @@ rules:
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let result = build_shoes_tun_config(28, &groups, &proxies, &rules);
-        assert!(result.is_err());
-        let error = result.unwrap_err();
+        assert!(result.is_ok(), "{result:?}");
+        let yaml = result.unwrap();
+        assert!(yaml.contains("type: tuic"), "{yaml}");
+        assert!(yaml.contains("transport: quic"), "{yaml}");
+        assert!(yaml.contains("verify: false"), "{yaml}");
         assert!(
-            error.contains("TUIC server code but no client outbound"),
-            "{error}"
+            yaml.contains("sni_hostname: \"tuic-sni.example.com\""),
+            "{yaml}"
         );
+        assert!(yaml.contains("alpn_protocols: \"h3\""), "{yaml}");
+        #[cfg(feature = "shoes-backend")]
+        assert!(shoes::config::load_config_str(&yaml).is_ok(), "{yaml}");
+    }
+
+    #[test]
+    fn maps_hysteria2_auth_alias_and_rejects_unsupported_obfs() {
+        let config = r#"
+proxies:
+  - { name: HY2, type: hy2, server: hy.example.com, port: 443, auth-str: secret }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [HY2] }
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let yaml = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(yaml.contains("type: hysteria2"), "{yaml}");
+        assert!(yaml.contains("password: \"secret\""), "{yaml}");
+        #[cfg(feature = "shoes-backend")]
+        assert!(shoes::config::load_config_str(&yaml).is_ok(), "{yaml}");
+
+        let unsupported = r#"
+proxies:
+  - { name: HY2, type: hy2, server: hy.example.com, port: 443, auth: secret, obfs: salamander, obfs-password: obfs-secret }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [HY2] }
+"#;
+        let (proxies, groups, rules) = parse_clash_config(unsupported);
+        let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
+        assert!(error.contains("uses obfs"), "{error}");
+    }
+
+    #[test]
+    fn maps_tuic_token_alias_and_reports_unsupported_congestion() {
+        let config = r#"
+proxies:
+  - { name: TUIC, type: tuic, server: tuic.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, token: secret }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [TUIC] }
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let yaml = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(yaml.contains("type: tuic"), "{yaml}");
+        assert!(yaml.contains("password: \"secret\""), "{yaml}");
+        #[cfg(feature = "shoes-backend")]
+        assert!(shoes::config::load_config_str(&yaml).is_ok(), "{yaml}");
+
+        let unsupported = r#"
+proxies:
+  - { name: TUIC, type: tuic, server: tuic.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, password: secret, congestion-controller: cubic }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [TUIC] }
+"#;
+        let (proxies, groups, rules) = parse_clash_config(unsupported);
+        let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
+        assert!(error.contains("congestion-controller cubic"), "{error}");
+    }
+
+    #[test]
+    fn parses_block_style_hysteria2_and_tuic_aliases() {
+        let config = r#"
+proxies:
+  - name: HY2 Block
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    auth: hy-secret
+    disable-sni: false
+  - name: TUIC Block
+    type: tuic
+    server: tuic.example.com
+    port: 443
+    uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0
+    token: tuic-secret
+    congestion-controller: bbr
+proxy-groups:
+  - name: HY2 Proxy
+    type: select
+    proxies:
+      - HY2 Block
+  - name: TUIC Proxy
+    type: select
+    proxies:
+      - TUIC Block
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let hy2_group = vec![groups
+            .iter()
+            .find(|group| group.name == "HY2 Proxy")
+            .unwrap()
+            .clone()];
+        let tuic_group = vec![groups
+            .iter()
+            .find(|group| group.name == "TUIC Proxy")
+            .unwrap()
+            .clone()];
+
+        let hy2_yaml = build_shoes_tun_config(28, &hy2_group, &proxies, &rules).unwrap();
+        assert!(hy2_yaml.contains("type: hysteria2"), "{hy2_yaml}");
+        assert!(hy2_yaml.contains("password: \"hy-secret\""), "{hy2_yaml}");
+
+        let tuic_yaml = build_shoes_tun_config(28, &tuic_group, &proxies, &rules).unwrap();
+        assert!(tuic_yaml.contains("type: tuic"), "{tuic_yaml}");
+        assert!(
+            tuic_yaml.contains("password: \"tuic-secret\""),
+            "{tuic_yaml}"
+        );
+
+        #[cfg(feature = "shoes-backend")]
+        {
+            assert!(
+                shoes::config::load_config_str(&hy2_yaml).is_ok(),
+                "{hy2_yaml}"
+            );
+            assert!(
+                shoes::config::load_config_str(&tuic_yaml).is_ok(),
+                "{tuic_yaml}"
+            );
+        }
     }
 
     #[test]
@@ -3637,12 +4213,12 @@ proxy-groups:
         let config = CString::new(
             r#"
 proxies:
-  - { name: HY2, type: hysteria2, server: hy.example.com, port: 443, password: secret }
+  - { name: SS Obfs, type: ss, server: ss.example.com, port: 443, cipher: aes-128-gcm, password: ss-secret, plugin: obfs, plugin-opts.mode: http, plugin-opts.host: www.example.com }
 proxy-groups:
   - name: Proxy
     type: select
     proxies:
-      - HY2
+      - SS Obfs
 rules:
   - MATCH,Proxy
 "#,
@@ -3656,8 +4232,8 @@ rules:
             .to_string();
         clashhm_native_core_free_string(status_ptr);
         assert!(status.contains("\"selectedGroup\":\"Proxy\""), "{status}");
-        assert!(status.contains("\"selectedProxy\":\"HY2\""), "{status}");
-        assert!(status.contains("hysteria2"), "{status}");
+        assert!(status.contains("\"selectedProxy\":\"SS Obfs\""), "{status}");
+        assert!(status.contains("plugin obfs is not supported"), "{status}");
     }
 
     #[test]
@@ -3852,41 +4428,74 @@ proxy-groups:
     #[cfg(feature = "shoes-backend")]
     #[test]
     fn generated_h2_transport_config_is_parseable_by_shoes() {
-        let config = r#"
+        let configs = [
+            r#"
 proxies:
-  - { name: VLESS H2, type: vless, server: h2.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: h2, h2-opts: { path: /h2, host: cdn.example.com } }
+  - { name: VMess H2, type: vmess, server: h2.example.com, port: 443, uuid: b0e80a62-8a51-47f0-91f1-f0f7faf8d9d4, cipher: auto, tls: true, network: h2, h2-opts: { path: /vmess, host: cdn.example.com } }
 proxy-groups:
-  - name: Proxy
-    type: select
-    proxies:
-      - VLESS H2
-"#;
-        let (proxies, groups, rules) = parse_clash_config(config);
-        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
-        assert!(
-            shoes::config::load_config_str(&shoes_config).is_ok(),
-            "{shoes_config}"
-        );
+  - { name: Proxy, type: select, proxies: [VMess H2] }
+"#,
+            r#"
+proxies:
+  - { name: VLESS H2, type: vless, server: h2.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: h2, h2-opts: { path: /vless, host: cdn.example.com } }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [VLESS H2] }
+"#,
+            r#"
+proxies:
+  - { name: Trojan H2, type: trojan, server: h2.example.com, port: 443, password: secret, tls: true, network: h2, h2-opts: { path: /trojan, host: cdn.example.com } }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [Trojan H2] }
+"#,
+        ];
+        for config in configs {
+            let (proxies, groups, rules) = parse_clash_config(config);
+            let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+            assert!(
+                shoes::config::load_config_str(&shoes_config).is_ok(),
+                "{shoes_config}"
+            );
+            assert!(shoes_config.contains("type: h2"), "{shoes_config}");
+            assert!(!shoes_config.contains("h2mux:"), "{shoes_config}");
+        }
     }
 
     #[cfg(feature = "shoes-backend")]
     #[test]
     fn generated_grpc_transport_config_is_parseable_by_shoes() {
-        let config = r#"
+        let configs = [
+            r#"
 proxies:
-  - { name: VLESS GRPC, type: vless, server: grpc.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: grpc, grpc-opts: { serviceName: proxy } }
+  - { name: VMess GRPC, type: vmess, server: grpc.example.com, port: 443, uuid: b0e80a62-8a51-47f0-91f1-f0f7faf8d9d4, cipher: auto, tls: true, network: grpc, grpc-opts: { serviceName: vmess } }
 proxy-groups:
-  - name: Proxy
-    type: select
-    proxies:
-      - VLESS GRPC
-"#;
-        let (proxies, groups, rules) = parse_clash_config(config);
-        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
-        assert!(
-            shoes::config::load_config_str(&shoes_config).is_ok(),
-            "{shoes_config}"
-        );
+  - { name: Proxy, type: select, proxies: [VMess GRPC] }
+"#,
+            r#"
+proxies:
+  - { name: VLESS GRPC, type: vless, server: grpc.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: grpc, grpc-opts: { serviceName: vless } }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [VLESS GRPC] }
+"#,
+            r#"
+proxies:
+  - { name: Trojan GRPC, type: trojan, server: grpc.example.com, port: 443, password: secret, tls: true, network: grpc, grpc-opts: { serviceName: trojan } }
+proxy-groups:
+  - { name: Proxy, type: select, proxies: [Trojan GRPC] }
+"#,
+        ];
+        for config in configs {
+            let (proxies, groups, rules) = parse_clash_config(config);
+            let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+            assert!(
+                shoes::config::load_config_str(&shoes_config).is_ok(),
+                "{shoes_config}"
+            );
+            assert!(shoes_config.contains("type: grpc"), "{shoes_config}");
+            assert!(
+                shoes_config.contains("alpn_protocols: \"h2\""),
+                "{shoes_config}"
+            );
+        }
     }
 
     #[cfg(feature = "shoes-backend")]

@@ -15,8 +15,8 @@ It is not a wrapper around a desktop Clash binary. The VPN traffic path is desig
 - Proxy groups, node selection, and saved selections
 - Rule / Global / Direct modes
 - Traffic counters and connection status
-- Proxy TCP latency checks before and after VPN connection
-- Explicit unsupported-protocol errors for HY2 and TUIC
+- Proxy-chain latency checks before and after VPN connection
+- Initial Hysteria2 and TUIC TCP/UDP outbound support
 - Chinese and English UI
 - Light and dark themes
 - No UI-process mihomo fallback path
@@ -37,6 +37,8 @@ Supported node types and options:
 - VMess
 - VLESS
 - Trojan
+- Hysteria2 / HY2
+- TUIC / TUIC v5
 - TLS
 - WebSocket
 - Clash/Xray `network: h2`
@@ -56,30 +58,28 @@ Supported rule handling currently covers common Clash rules such as:
 - `IP-CIDR`
 - `IP-CIDR6`
 - `DST-PORT`
-- Expanded local `RULE-SET` entries for common provider formats
+- Expanded local/inline `RULE-SET` entries for common `domain`, `ipcidr`, and `classical` provider formats, including explicit `DOMAIN-KEYWORD`, `GEOIP`, and `GEOSITE` entries; common block-style, flow-style, inline-array, and direct-list provider files are handled by the config merge path
 - Built-in `GEOIP,PRIVATE/LAN`
 - MMDB-backed `GEOIP,<country-code>` country rules, including `GEOIP,CN`
 - Built-in private `GEOSITE,cn/private/local/lan` shortcuts
 - Dat-backed `GEOSITE,<category>` routing from embedded v2fly domain-list-community data
-- `url-test` / `fallback` group selection based on native-core latency results
+- `url-test` / `fallback` group selection based on native-core HTTP URL-test latency results
 
 Still unsupported or incomplete:
 
-- Hysteria2
-- TUIC
-- Advanced or unresolved `RULE-SET` provider forms
+- Broader Hysteria2/TUIC real-device coverage and remaining Clash option compatibility, including HY2 obfs and non-default TUIC congestion options
+- Advanced or unresolved `RULE-SET` provider forms that cannot be materialized locally
 - Regex-only GEOSITE entries that cannot be represented by the current embedded matcher
 - simple-obfs / obfs Shadowsocks plugins
-- Full Clash-compatible URL-test behavior
 
 ## Recommended Roadmap
 
 The highest-value work is routing and compatibility before adding more protocol families:
 
-1. Improve broader rule-provider compatibility and remaining rule matcher gaps.
+1. Improve remaining dynamic rule-provider compatibility and rule matcher gaps.
 2. Expand provider and subscription compatibility using mihomo/sing-box behavior as references.
 3. Add real-device coverage for HTTP/2 and gRPC transport variants.
-4. Implement Hysteria2 and TUIC only after the embedded backend has a complete QUIC client path.
+4. Validate Hysteria2 and TUIC TCP/UDP behavior on real devices and broaden Clash option compatibility.
 5. Polish release packaging, screenshots, and user-facing diagnostics.
 
 This order keeps existing supported nodes reliable while reducing cases where a subscription imports successfully but routing is incomplete.
@@ -119,7 +119,7 @@ More details are available in [docs/extension-native-core.md](docs/extension-nat
 5. Switch nodes from the Proxy page when needed.
 6. Check logs and traffic stats from the app.
 
-Proxy lists are parsed from the local subscription config, so they should be visible even before the VPN is connected. Disconnected latency checks use the local native-core TCP probe only; connected latency checks run through the VPN Extension command channel.
+Proxy lists are parsed from the local subscription config, so they should be visible even before the VPN is connected. Disconnected latency checks use the local native-core proxy-chain probe; connected latency checks run through the VPN Extension command channel.
 
 ## Build
 
@@ -130,14 +130,16 @@ Proxy lists are parsed from the local subscription config, so they should be vis
 - HarmonyOS Native SDK
 - ARM64 HarmonyOS NEXT device
 
-The repository includes the generated native-core static library used by DevEco builds:
+The repository includes split native-core static library parts used by DevEco builds:
 
 ```text
-clash/src/main/cpp/native-core/libclashhm_native_core.a
+clash/src/main/cpp/native-core/libclashhm_native_core.a.part00
+clash/src/main/cpp/native-core/libclashhm_native_core.a.part01
+...
 clash/src/main/cpp/native-core/native_core.h
 ```
 
-This lets DevEco build the HAP without requiring Rust/Cargo on the DevEco machine. If you want to rebuild the native core yourself, install Rust and run:
+`clash/src/main/cpp/CMakeLists.txt` reconstructs `libclashhm_native_core.a` from the parts when the full archive is missing. This lets DevEco build the HAP without requiring Rust/Cargo on the DevEco machine and avoids GitHub's single-file size limit. If you want to rebuild the native core yourself, install Rust and run:
 
 ```bash
 export OHOS_NATIVE_HOME=/path/to/openharmony/native
@@ -154,6 +156,7 @@ Then build the app in DevEco Studio:
 Native-core release artifacts can be packaged or installed with:
 
 ```bash
+bash scripts/verify-native-core-artifact.sh
 bash scripts/package-native-core-artifact.sh
 bash scripts/install-native-core-artifact.sh /path/to/clashhm-native-core-ohos-arm64-*.tar.gz
 ```
@@ -185,14 +188,14 @@ The remaining protocol work is not just a parser task. ClashHM already parses ma
 
 Estimated work:
 
-- Hysteria2: large. Requires a real HY2 client implementation in the embedded backend or a backend replacement that exposes one. Adapter-only changes are not enough.
-- TUIC: large. Same reason as Hysteria2: the current backend does not expose a TUIC client outbound.
+- Hysteria2: TCP outbound, HTTP/3 auth, `password`/`auth`/`auth-str` credential aliases, first-hop UDP datagrams, and UDP fragmentation/reassembly have initial support through the embedded backend. Remaining work is HY2 obfs compatibility and real-device validation across subscriptions.
+- TUIC: TUIC v5 TCP outbound, QUIC auth, `password`/`token` credential aliases, first-hop UDP datagrams, and UDP fragmentation/reassembly have initial support through the embedded backend. Remaining work is non-default congestion option compatibility and real-device validation across subscriptions.
 - gRPC transport: initial backend support exists through a real gRPC-over-HTTP/2 transport wrapper with `grpc-opts.serviceName`. It still needs more real-device coverage across subscription variants.
 - Clash/Xray `network: h2`: initial backend support exists through a real HTTP/2 transport wrapper. It is not mapped to h2mux; it still needs more real-device coverage across subscription variants.
 
 Practical options:
 
-- Extend or replace the embedded backend with mature client implementations for HY2/TUIC.
+- Harden the embedded HY2/TUIC relay behavior against more real subscription variants.
 - Keep the current strict adapter and add protocol support one backend capability at a time.
 - Avoid claiming compatibility for unsupported protocols until real traffic tests pass on device.
 

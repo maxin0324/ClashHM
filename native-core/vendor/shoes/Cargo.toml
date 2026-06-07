@@ -81,6 +81,7 @@ tokio = { version = "*", features = [
     "sync",
     "time",
 ] }
+tokio-rustls = "*"
 tokio-util = { version = "*", features = ["time"] }
 tun = { version = "*", features = ["async"] }
 url = "*"
@@ -92,7 +93,6 @@ rcgen = { version = "*", default-features = false, features = ["aws_lc_rs", "pem
 rustls-pemfile = "*"
 serde_json = "*"
 tempfile = "*"
-tokio-rustls = "*"
 
 # jemalloc for better memory performance (not supported on Windows MSVC, iOS, or Android)
 [target.'cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))'.dependencies]

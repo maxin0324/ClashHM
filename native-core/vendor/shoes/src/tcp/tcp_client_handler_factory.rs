@@ -12,6 +12,7 @@ use crate::config::{
 };
 use crate::h2mux::H2MuxClientHandler;
 use crate::http_handler::HttpTcpClientHandler;
+use crate::hysteria2_client_handler::Hysteria2TcpClientHandler;
 use crate::naiveproxy::{
     GrpcTransportTcpClientHandler, H2TransportTcpClientHandler, NaiveProxyTcpClientHandler,
 };
@@ -26,6 +27,7 @@ use crate::tcp::chain_builder::build_client_chain_group;
 use crate::tcp::tcp_handler::TcpClientHandler;
 use crate::tls_client_handler::TlsClientHandler;
 use crate::trojan_handler::TrojanTcpHandler;
+use crate::tuic_client_handler::TuicTcpClientHandler;
 use crate::uuid_util::parse_uuid;
 use crate::vless::vless_client_handler::VlessTcpClientHandler;
 use crate::vmess::VmessTcpClientHandler;
@@ -123,6 +125,8 @@ pub fn create_tcp_client_handler(
                 handler
             }
         }
+        ClientProxyConfig::Hysteria2 { .. } => Box::new(Hysteria2TcpClientHandler::new()),
+        ClientProxyConfig::TuicV5 { .. } => Box::new(TuicTcpClientHandler::new()),
         ClientProxyConfig::Tls(tls_client_config) => {
             let TlsClientConfig {
                 verify,

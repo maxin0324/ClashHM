@@ -7,6 +7,23 @@ set(NATIVE_CORE_HEADER ${NATIVE_CORE_DIR}/native_core.h)
 set(NATIVE_CORE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native-core)
 option(CLASHHM_AUTO_BUILD_NATIVE_CORE "Build ClashHM Rust native-core when the Rust/OHOS toolchain is available" ON)
 
+if(NOT EXISTS ${NATIVE_CORE_LIB})
+    file(GLOB NATIVE_CORE_LIB_PARTS "${NATIVE_CORE_LIB}.part*")
+    list(SORT NATIVE_CORE_LIB_PARTS)
+    if(NATIVE_CORE_LIB_PARTS)
+        message(STATUS "ClashHM native-core: reconstructing ${NATIVE_CORE_LIB} from split parts")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E cat ${NATIVE_CORE_LIB_PARTS}
+            OUTPUT_FILE ${NATIVE_CORE_LIB}
+            RESULT_VARIABLE CLASHHM_NATIVE_CORE_RESTORE_RESULT
+            ERROR_VARIABLE CLASHHM_NATIVE_CORE_RESTORE_ERROR
+        )
+        if(NOT CLASHHM_NATIVE_CORE_RESTORE_RESULT EQUAL 0)
+            message(WARNING "ClashHM native-core split artifact restore failed. ${CLASHHM_NATIVE_CORE_RESTORE_ERROR}")
+        endif()
+    endif()
+endif()
+
 set(CLASHHM_NATIVE_CORE_SOURCES
     clash_bridge.cpp
     ohos_compat_shim.cpp

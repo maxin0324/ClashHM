@@ -111,4 +111,8 @@ if [[ "${CLASHHM_SKIP_ARCHIVE_STRIP:-0}" != "1" ]] && command -v strip >/dev/nul
     "$OUT_DIR/libclashhm_native_core.a" || true
 fi
 cp "$ROOT_DIR/src/native_core.h" "$OUT_DIR/native_core.h"
+rm -f "$OUT_DIR/libclashhm_native_core.a.part"*
+split -b "${CLASHHM_NATIVE_CORE_PART_SIZE:-32m}" -d -a 2 \
+  "$OUT_DIR/libclashhm_native_core.a" \
+  "$OUT_DIR/libclashhm_native_core.a.part"
 echo "native core static library copied to $OUT_DIR"

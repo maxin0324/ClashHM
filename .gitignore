@@ -15,3 +15,7 @@ artifacts/
 native-core/target/
 native-core/.cargo/config.toml
 clash/src/main/cpp/native-core/
+!clash/src/main/cpp/native-core/
+!clash/src/main/cpp/native-core/native_core.h
+clash/src/main/cpp/native-core/libclashhm_native_core.a
+!clash/src/main/cpp/native-core/libclashhm_native_core.a.part*
