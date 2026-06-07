@@ -13,6 +13,7 @@ The project is currently focused on making a reliable HarmonyOS NEXT client with
 - Proxy groups, node selection, and saved selections
 - Rule / Global / Direct modes
 - Traffic counters and connection status
+- Proxy TCP latency checks before and after VPN connection
 - Chinese and English UI
 - Light and dark themes
 - No UI-process mihomo fallback path
@@ -99,7 +100,7 @@ More details are available in [docs/extension-native-core.md](docs/extension-nat
 5. Switch nodes from the Proxy page when needed.
 6. Check logs and traffic stats from the app.
 
-Proxy lists are parsed from the local subscription config, so they should be visible even before the VPN is connected. Latency checks and live Extension status require the native core path to be available.
+Proxy lists are parsed from the local subscription config, so they should be visible even before the VPN is connected. Disconnected latency checks use the local native-core TCP probe only; connected latency checks run through the VPN Extension command channel.
 
 ## Build
 

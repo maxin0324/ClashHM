@@ -7,6 +7,7 @@ The HarmonyOS app no longer keeps a mihomo/tun2socks fallback. DevEco/Hvigor bui
 Current state:
 
 - Defines the stable native API.
+- Can load a Clash config without starting TUN so the UI process can perform local TCP latency probes while disconnected.
 - Parses Clash config with `serde_yaml` first, then falls back to the older line parser. This is closer to mihomo's tolerant YAML handling and supports common block and flow-style subscription output.
 - Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and common YAML-native inline `rule-providers[].payload` referenced by `RULE-SET`.
 - Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, and basic `GEOSITE,cn/geolocation-cn` to shoes TUN rules.
@@ -22,7 +23,7 @@ Current state:
 - Fails explicitly for unsupported outbound protocols or transports such as Hysteria2, TUIC, `network: grpc`, and `network: h2`. The vendored shoes client config does not currently expose Hysteria2/TUIC outbound variants, and Clash/Xray `network: h2` is not the same protocol as shoes/sing-box h2mux, so these must not be silently mapped to TCP or h2mux.
 - Applies proxy selection inside the Extension. Current running selections are recorded quickly and take effect on the next VPN core start; hot backend reload is still a later task. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
 - The patched shoes backend converts TUN UDP/53 DNS queries into DNS-over-TCP over the selected proxy chain. This avoids the common Trojan UDP gap where the VPN appears connected but domains cannot resolve.
-- Provides a basic TCP connect latency probe for parsed proxy nodes, returns cached latency in proxy-group JSON, and uses those results to update `url-test` / `fallback` group choices. Full Clash-style URL testing through every proxy protocol is still a later adapter task.
+- Provides a basic TCP connect latency probe for parsed proxy nodes, including disconnected local probes after `load_config`, returns cached latency in proxy-group JSON, and uses those results to update `url-test` / `fallback` group choices. Full Clash-style URL testing through every proxy protocol is still a later adapter task.
 - Returns structured runtime status with backend name, selected group/proxy, parsed object counts, uptime, last error, and last latency probe result.
 - Exposes traffic and connection APIs through the native boundary. Traffic totals and speeds are now sourced from the patched shoes TUN read/write path.
 
