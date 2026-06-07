@@ -1637,6 +1637,38 @@ fn rule_mask(rule: &ClashRule) -> Option<String> {
     }
 }
 
+fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
+    let mut types = Vec::new();
+    for rule in rules {
+        if rule_mask(rule).is_some() {
+            continue;
+        }
+        if !types.contains(&rule.rule_type) {
+            types.push(rule.rule_type.clone());
+        }
+    }
+    types
+}
+
+fn skipped_rule_count(rules: &[ClashRule]) -> usize {
+    rules
+        .iter()
+        .filter(|rule| rule_mask(rule).is_none())
+        .count()
+}
+
+fn json_string_array(values: &[String]) -> String {
+    let mut out = String::from("[");
+    for (idx, value) in values.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", json_escape(value)));
+    }
+    out.push(']');
+    out
+}
+
 fn build_rule_yaml(
     mask: &str,
     target: &str,
@@ -2088,13 +2120,15 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
     let selected_proxy_server = selected_proxy
         .map(|proxy| proxy_field(proxy, "server"))
         .unwrap_or("");
+    let skipped_types = skipped_rule_types(&guard.rules);
+    let skipped_count = skipped_rule_count(&guard.rules);
     let uptime_ms = if running && guard.started_at_ms > 0 {
         now_ms().saturating_sub(guard.started_at_ms)
     } else {
         0
     };
     into_c_string(format!(
-        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"parserVersion\":\"{}\"}}",
+        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"parserVersion\":\"{}\"}}",
         if running { "true" } else { "false" },
         json_escape(&guard.engine),
         guard.tun_fd,
@@ -2107,6 +2141,8 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         guard.proxies.len(),
         guard.groups.len(),
         guard.rules.len(),
+        skipped_count,
+        json_string_array(&skipped_types),
         uptime_ms,
         guard.last_delay_ms,
         json_escape(PARSER_VERSION)
@@ -2766,6 +2802,39 @@ rules:
         assert!(status.contains("\"selectedGroup\":\"Proxy\""), "{status}");
         assert!(status.contains("\"selectedProxy\":\"HY2\""), "{status}");
         assert!(status.contains("hysteria2"), "{status}");
+    }
+
+    #[test]
+    fn status_json_reports_skipped_rule_types() {
+        let home = CString::new("/tmp/clashhm-test").unwrap();
+        assert_eq!(clashhm_native_core_init(home.as_ptr()), 0);
+
+        let config = CString::new(
+            r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rules:
+  - DOMAIN-KEYWORD,google,Proxy
+  - GEOIP,CN,DIRECT
+  - MATCH,Proxy
+"#,
+        )
+        .unwrap();
+        let _ = clashhm_native_core_start_tun(28, config.as_ptr());
+        let status_ptr = clashhm_native_core_get_status_json();
+        let status = unsafe { CStr::from_ptr(status_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        clashhm_native_core_free_string(status_ptr);
+        assert!(status.contains("\"skippedRuleCount\":2"), "{status}");
+        assert!(status.contains("DOMAIN-KEYWORD"), "{status}");
+        assert!(status.contains("GEOIP"), "{status}");
     }
 
     #[test]
