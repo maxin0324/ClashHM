@@ -2,7 +2,9 @@
 
 ClashHM is a Clash-style proxy client for HarmonyOS NEXT. It is built as a native HarmonyOS app and runs its VPN data path inside `VpnExtensionAbility`, so the proxy core stays with the system VPN extension instead of depending on a foreground UI process.
 
-The project is currently focused on making a reliable HarmonyOS NEXT client with subscription management, proxy selection, rule-based routing, traffic stats, and an embedded native core.
+The project is focused on a reliable HarmonyOS NEXT VPN client with subscription management, proxy selection, rule-based routing, traffic stats, and an embedded native core.
+
+It is not a wrapper around a desktop Clash binary. The VPN traffic path is designed for HarmonyOS NEXT and runs inside the system VPN Extension.
 
 ## Highlights
 
@@ -65,6 +67,18 @@ Still unsupported or incomplete:
 - Full MMDB/dat backed `GEOIP` / `GEOSITE` routing
 - simple-obfs / obfs Shadowsocks plugins
 - Full Clash-compatible URL-test behavior
+
+## Recommended Roadmap
+
+The highest-value work is routing and compatibility before adding more protocol families:
+
+1. Improve rule matching with local MMDB/dat backed `GEOIP` and `GEOSITE`.
+2. Expand provider and subscription compatibility using mihomo/sing-box behavior as references.
+3. Add real-device coverage for HTTP/2 and gRPC transport variants.
+4. Implement Hysteria2 and TUIC only after the embedded backend has a complete QUIC client path.
+5. Polish release packaging, screenshots, and user-facing diagnostics.
+
+This order keeps existing supported nodes reliable while reducing cases where a subscription imports successfully but routing is incomplete.
 
 ## Why Extension Native Core
 
