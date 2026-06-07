@@ -14,6 +14,7 @@ The project is currently focused on making a reliable HarmonyOS NEXT client with
 - Rule / Global / Direct modes
 - Traffic counters and connection status
 - Proxy TCP latency checks before and after VPN connection
+- Explicit unsupported-protocol errors for HY2, TUIC, gRPC, and Clash/Xray h2
 - Chinese and English UI
 - Light and dark themes
 - No UI-process mihomo fallback path
@@ -89,7 +90,7 @@ VpnExtensionAbility process
 
 This avoids keeping the app alive with unrelated background capabilities and keeps the network path attached to the system VPN extension.
 
-More details are available in [docs/extension-native-core.md](docs/extension-native-core.md).
+More details are available in [docs/extension-native-core.md](docs/extension-native-core.md). Protocol capability details and the backend implementation matrix are tracked in [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md).
 
 ## Screens and Workflow
 

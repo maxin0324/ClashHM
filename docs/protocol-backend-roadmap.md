@@ -34,6 +34,27 @@ The current embedded backend supports the selected-node path for:
 - v2ray-plugin WebSocket wrapping
 - VMess / VLESS / Trojan `mux` / `h2mux`
 
+## Capability Matrix
+
+| Clash node / transport | Current status | Notes |
+| --- | --- | --- |
+| `DIRECT` | Supported | Used for direct groups and rules. |
+| Shadowsocks / `ss` | Supported | AEAD and supported 2022 ciphers through shoes validation. Unsupported plugins fail explicitly. |
+| Snell | Supported | Basic client mapping. |
+| SOCKS5 | Supported | Username/password supported. |
+| HTTP / HTTPS proxy | Supported | HTTP CONNECT upstream. |
+| VMess | Supported | TCP, TLS, WebSocket, Reality/TLS wrappers where applicable. |
+| VLESS | Supported | TCP, TLS, WebSocket, Reality and Vision where supported by shoes. |
+| Trojan | Supported | TCP/TLS and supported wrappers. |
+| AnyTLS | Supported | Client outbound exists in shoes. |
+| NaiveProxy | Supported | Uses shoes NaiveProxy HTTP/2 CONNECT implementation. |
+| `network: ws` / `ws-opts` | Supported | Maps to shoes WebSocket wrapper. |
+| Clash `mux` / `h2mux` / `smux` options | Partially supported | Maps to shoes sing-box-style h2mux for VMess/VLESS/Trojan. This is not Clash/Xray `network: h2`. |
+| Hysteria2 / HY2 | Unsupported | Shoes currently has server-side Hysteria2 code, but no client outbound config/handler. |
+| TUIC / TUIC v5 | Unsupported | Shoes currently has server-side TUIC code, but no client outbound config/handler. |
+| `network: grpc` | Unsupported | Shoes has no Clash/Xray gRPC client transport wrapper. |
+| Clash/Xray `network: h2` | Unsupported | Ordinary HTTP/2 transport with path/host options; not equivalent to shoes h2mux. |
+
 ## Remaining Protocols
 
 ### Hysteria2

@@ -1266,6 +1266,18 @@ fn protocol_indent(indent: usize) -> String {
 fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, String> {
     let proxy_type = proxy.proxy_type.to_lowercase();
     let pad = protocol_indent(indent);
+    if proxy_type == "hysteria2" || proxy_type == "hy2" || proxy_type == "hysteria" {
+        return Err(format!(
+            "proxy {} type {} is not supported: the vendored shoes backend currently has Hysteria2 server code but no client outbound config/handler",
+            proxy.name, proxy.proxy_type
+        ));
+    }
+    if proxy_type == "tuic" || proxy_type == "tuic-v5" || proxy_type == "tuicv5" {
+        return Err(format!(
+            "proxy {} type {} is not supported: the vendored shoes backend currently has TUIC server code but no client outbound config/handler",
+            proxy.name, proxy.proxy_type
+        ));
+    }
     if proxy_type == "direct" {
         return Ok(format!("{pad}type: direct\n"));
     }
@@ -1427,6 +1439,23 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
     ))
 }
 
+fn unsupported_network_error(proxy: &ProxyNode, network: &str) -> String {
+    match network {
+        "grpc" => format!(
+            "proxy {} network grpc is not supported: the vendored shoes backend has no Clash/Xray gRPC client transport wrapper",
+            proxy.name
+        ),
+        "h2" | "http" | "http2" => format!(
+            "proxy {} network {} is not supported: Clash/Xray HTTP/2 transport is not the same as shoes h2mux and must not be mapped silently",
+            proxy.name, network
+        ),
+        other => format!(
+            "proxy {} network {} is not supported by the embedded shoes adapter yet",
+            proxy.name, other
+        ),
+    }
+}
+
 fn wrap_websocket(proxy: &ProxyNode, inner: String, indent: usize) -> String {
     let pad = protocol_indent(indent);
     let inner_pad = protocol_indent(indent + 2);
@@ -1570,10 +1599,7 @@ fn build_proxy_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Stri
     if network == "ws" || network == "websocket" {
         protocol = wrap_websocket(proxy, protocol, indent);
     } else if !network.is_empty() && network != "tcp" {
-        return Err(format!(
-            "proxy {} network {} is not supported by the embedded shoes adapter yet",
-            proxy.name, network
-        ));
+        return Err(unsupported_network_error(proxy, &network));
     }
     let plugin = proxy_field(proxy, "plugin").to_lowercase();
     if plugin == "shadow-tls" || plugin == "shadowtls" {
@@ -2639,7 +2665,11 @@ rules:
         let (proxies, groups, rules) = parse_clash_config(config);
         let result = build_shoes_tun_config(28, &groups, &proxies, &rules);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("hysteria2"));
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("Hysteria2 server code but no client outbound"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -2658,7 +2688,11 @@ rules:
         let (proxies, groups, rules) = parse_clash_config(config);
         let result = build_shoes_tun_config(28, &groups, &proxies, &rules);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("tuic"));
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("TUIC server code but no client outbound"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -2879,7 +2913,7 @@ proxy-groups:
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
-        assert!(error.contains("network grpc is not supported"));
+        assert!(error.contains("gRPC client transport wrapper"), "{error}");
     }
 
     #[test]
@@ -2895,7 +2929,7 @@ proxy-groups:
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
-        assert!(error.contains("network h2 is not supported"));
+        assert!(error.contains("not the same as shoes h2mux"), "{error}");
     }
 
     #[test]
