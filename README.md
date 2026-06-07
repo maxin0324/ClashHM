@@ -167,6 +167,8 @@ Practical options:
 - Keep the current strict adapter and add protocol support one backend capability at a time.
 - Avoid claiming compatibility for unsupported protocols until real traffic tests pass on device.
 
+Detailed backend planning is tracked in [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md).
+
 ## Development Notes
 
 ClashHM favors explicit failures over silent fallback. This is especially important for VPN software: a connection that appears successful but routes incorrectly is worse than a clear unsupported-protocol error.
@@ -187,6 +189,8 @@ For HarmonyOS device validation, build and run from DevEco Studio, then test:
 - node switching
 - traffic counters
 - disconnect and reconnect
+
+The full release checklist is in [docs/release-checklist.md](docs/release-checklist.md).
 
 ## References
 
