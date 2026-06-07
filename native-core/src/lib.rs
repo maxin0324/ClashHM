@@ -1858,6 +1858,7 @@ fn geosite_suffixes(payload: &str) -> Option<Vec<&'static str>> {
         .as_str()
     {
         "cn" | "geolocation-cn" => Some(vec!["cn"]),
+        "private" | "local" | "lan" => Some(vec!["localhost", "local", "lan", "home.arpa"]),
         _ => None,
     }
 }
@@ -2689,6 +2690,9 @@ proxy-groups:
 rules:
   - GEOIP,PRIVATE,DIRECT
   - GEOSITE,cn,DIRECT
+  - GEOSITE,private,DIRECT
+  - GEOSITE,local,DIRECT
+  - GEOSITE,lan,DIRECT
   - MATCH,Proxy
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
@@ -2696,6 +2700,10 @@ rules:
         assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
         assert!(shoes_config.contains("masks: \"192.168.0.0/16\""));
         assert!(shoes_config.contains("masks: \"cn\""));
+        assert!(shoes_config.contains("masks: \"localhost\""));
+        assert!(shoes_config.contains("masks: \"local\""));
+        assert!(shoes_config.contains("masks: \"lan\""));
+        assert!(shoes_config.contains("masks: \"home.arpa\""));
         assert!(shoes_config.contains("type: direct"));
         assert!(shoes_config.contains("address: \"proxy.example.com:443\""));
     }

@@ -139,6 +139,7 @@ The embedded backend currently models routing through `NetLocationMask`. This ha
 - `DST-PORT`
 - basic `GEOIP,PRIVATE/LAN`
 - basic `GEOSITE,cn/geolocation-cn`
+- local-domain `GEOSITE,private/local/lan`
 
 The following need backend matcher expansion:
 

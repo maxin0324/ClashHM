@@ -57,7 +57,7 @@ Supported rule handling currently covers common Clash rules such as:
 - `IP-CIDR6`
 - `DST-PORT`
 - Expanded local `RULE-SET` entries for common provider formats
-- Basic built-in `GEOIP,PRIVATE/LAN` and `GEOSITE,cn/geolocation-cn` rules
+- Basic built-in `GEOIP,PRIVATE/LAN`, `GEOSITE,cn/geolocation-cn`, and `GEOSITE,private/local/lan` rules
 - `url-test` / `fallback` group selection based on native-core latency results
 
 Still unsupported or incomplete:
