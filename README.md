@@ -51,6 +51,7 @@ Supported rule handling currently covers common Clash rules such as:
 - `IP-CIDR6`
 - `DST-PORT`
 - Expanded local `RULE-SET` entries for common provider formats
+- Basic built-in `GEOIP,PRIVATE/LAN` and `GEOSITE,cn/geolocation-cn` rules
 
 Still unsupported or incomplete:
 
@@ -58,7 +59,7 @@ Still unsupported or incomplete:
 - TUIC
 - gRPC transport
 - Clash/Xray `network: h2` transport
-- GEOIP / GEOSITE routing
+- Full MMDB/dat backed `GEOIP` / `GEOSITE` routing
 - simple-obfs / obfs Shadowsocks plugins
 - Full Clash-compatible URL-test behavior
 

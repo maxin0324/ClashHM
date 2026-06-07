@@ -1637,6 +1637,57 @@ fn rule_mask(rule: &ClashRule) -> Option<String> {
     }
 }
 
+fn geosite_suffixes(payload: &str) -> Option<Vec<&'static str>> {
+    match payload
+        .trim()
+        .trim_start_matches("geosite:")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "cn" | "geolocation-cn" => Some(vec!["cn"]),
+        _ => None,
+    }
+}
+
+fn geoip_cidrs(payload: &str) -> Option<Vec<&'static str>> {
+    match payload
+        .trim()
+        .trim_start_matches("geoip:")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "private" | "lan" => Some(vec![
+            "0.0.0.0/8",
+            "10.0.0.0/8",
+            "100.64.0.0/10",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "224.0.0.0/4",
+            "::1/128",
+            "fc00::/7",
+            "fe80::/10",
+        ]),
+        _ => None,
+    }
+}
+
+fn modeled_rule_masks(rule: &ClashRule) -> Option<Vec<String>> {
+    if let Some(mask) = rule_mask(rule) {
+        return Some(vec![mask]);
+    }
+    if rule.rule_type == "GEOSITE" {
+        return geosite_suffixes(&rule.payload)
+            .map(|suffixes| suffixes.into_iter().map(str::to_string).collect());
+    }
+    if rule.rule_type == "GEOIP" {
+        return geoip_cidrs(&rule.payload)
+            .map(|cidrs| cidrs.into_iter().map(str::to_string).collect());
+    }
+    None
+}
+
 fn build_domain_keyword_rule_yaml(
     keyword: &str,
     target: &str,
@@ -1658,7 +1709,7 @@ fn build_domain_keyword_rule_yaml(
 fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
     let mut types = Vec::new();
     for rule in rules {
-        if rule.rule_type == "DOMAIN-KEYWORD" || rule_mask(rule).is_some() {
+        if rule.rule_type == "DOMAIN-KEYWORD" || modeled_rule_masks(rule).is_some() {
             continue;
         }
         if !types.contains(&rule.rule_type) {
@@ -1671,7 +1722,7 @@ fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
 fn skipped_rule_count(rules: &[ClashRule]) -> usize {
     rules
         .iter()
-        .filter(|rule| rule.rule_type != "DOMAIN-KEYWORD" && rule_mask(rule).is_none())
+        .filter(|rule| rule.rule_type != "DOMAIN-KEYWORD" && modeled_rule_masks(rule).is_none())
         .count()
 }
 
@@ -1735,10 +1786,12 @@ fn build_shoes_rules(
             )?);
             continue;
         }
-        let Some(mask) = rule_mask(rule) else {
+        let Some(masks) = modeled_rule_masks(rule) else {
             continue;
         };
-        out.push_str(&build_rule_yaml(&mask, &rule.target, groups, proxies)?);
+        for mask in masks {
+            out.push_str(&build_rule_yaml(&mask, &rule.target, groups, proxies)?);
+        }
     }
     if !out.contains("0.0.0.0/0") {
         out.push_str(&build_default_rule(groups, proxies)?);
@@ -2374,6 +2427,30 @@ rules:
     }
 
     #[test]
+    fn maps_basic_geoip_private_and_geosite_cn_rules() {
+        let config = r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rules:
+  - GEOIP,PRIVATE,DIRECT
+  - GEOSITE,cn,DIRECT
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
+        assert!(shoes_config.contains("masks: \"192.168.0.0/16\""));
+        assert!(shoes_config.contains("masks: \"cn\""));
+        assert!(shoes_config.contains("type: direct"));
+        assert!(shoes_config.contains("address: \"proxy.example.com:443\""));
+    }
+
+    #[test]
     fn rejects_unsupported_protocols_explicitly() {
         let config = r#"
 proxies:
@@ -2848,6 +2925,8 @@ proxy-groups:
       - A
 rules:
   - DOMAIN-KEYWORD,google,Proxy
+  - GEOIP,PRIVATE,DIRECT
+  - GEOSITE,cn,DIRECT
   - GEOIP,CN,DIRECT
   - MATCH,Proxy
 "#,
@@ -2862,6 +2941,7 @@ rules:
         clashhm_native_core_free_string(status_ptr);
         assert!(status.contains("\"skippedRuleCount\":1"), "{status}");
         assert!(!status.contains("DOMAIN-KEYWORD"), "{status}");
+        assert!(!status.contains("GEOSITE"), "{status}");
         assert!(status.contains("GEOIP"), "{status}");
     }
 
@@ -2946,14 +3026,19 @@ proxy-groups:
       - SS
 rules:
   - DOMAIN-KEYWORD,google,Proxy
+  - GEOIP,PRIVATE,DIRECT
+  - GEOSITE,cn,DIRECT
   - GEOIP,CN,DIRECT
   - MATCH,Proxy
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
-        assert_eq!(rules.len(), 3);
+        assert_eq!(rules.len(), 5);
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
         assert!(shoes_config.contains("0.0.0.0/0"));
         assert!(shoes_config.contains("domain_keywords: \"google\""));
+        assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
+        assert!(shoes_config.contains("masks: \"cn\""));
+        assert!(!shoes_config.contains("masks: \"CN\""));
     }
 
     #[test]
@@ -3023,7 +3108,10 @@ proxy-groups:
     proxies:
       - A
 rules:
+  - DOMAIN-KEYWORD,google,Proxy
   - DOMAIN-SUFFIX,example.com,DIRECT
+  - GEOIP,PRIVATE,DIRECT
+  - GEOSITE,geolocation-cn,DIRECT
   - IP-CIDR,10.0.0.0/8,DIRECT
   - MATCH,Proxy
 "#;

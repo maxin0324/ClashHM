@@ -106,11 +106,13 @@ The embedded backend currently models routing through `NetLocationMask`. This ha
 - `IP-CIDR`
 - `IP-CIDR6`
 - `DST-PORT`
+- basic `GEOIP,PRIVATE/LAN`
+- basic `GEOSITE,cn/geolocation-cn`
 
 The following need backend matcher expansion:
 
-- `GEOIP`
-- `GEOSITE`
+- full MMDB/dat backed `GEOIP`
+- full MMDB/dat backed `GEOSITE`
 - advanced / unresolved `RULE-SET`
 
 Current behavior is explicit diagnostic fallback: unsupported rules are skipped, and status JSON reports `skippedRuleCount` and `skippedRuleTypes`.
@@ -118,7 +120,7 @@ Current behavior is explicit diagnostic fallback: unsupported rules are skipped,
 ## Recommended Implementation Order
 
 1. Finish rule matcher expansion before new transport protocols.
-2. Add local MMDB/dat based `GEOIP` / `GEOSITE` support.
+2. Add local MMDB/dat based full `GEOIP` / `GEOSITE` support.
 3. Add gRPC and HTTP/2 transports for VMess/VLESS/Trojan.
 4. Add HY2 and TUIC only after the backend has a real QUIC client path.
 
