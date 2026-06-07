@@ -1958,7 +1958,11 @@ fn tcp_delay_ms(proxy: &ProxyNode, timeout_ms: i32) -> Result<i32, i32> {
     Ok(start.elapsed().as_millis().min(i32::MAX as u128) as i32)
 }
 
-fn proxies_json(groups: &[ProxyGroup], proxies: &[ProxyNode]) -> String {
+fn proxies_json(
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+    delay_by_proxy: &BTreeMap<String, i32>,
+) -> String {
     let mut out = String::from("[");
     for (idx, group) in groups.iter().enumerate() {
         if idx > 0 {
@@ -1984,10 +1988,14 @@ fn proxies_json(groups: &[ProxyGroup], proxies: &[ProxyNode]) -> String {
                     out.push(',');
                 }
                 node_count += 1;
+                let latency = delay_by_proxy.get(&proxy.name).copied().unwrap_or(-1);
+                let alive = latency != 0;
                 out.push_str(&format!(
-                    "{{\"name\":\"{}\",\"type\":\"{}\",\"alive\":true,\"latency\":-1}}",
+                    "{{\"name\":\"{}\",\"type\":\"{}\",\"alive\":{},\"latency\":{}}}",
                     json_escape(&proxy.name),
-                    json_escape(&proxy.proxy_type)
+                    json_escape(&proxy.proxy_type),
+                    if alive { "true" } else { "false" },
+                    latency
                 ));
             }
         }
@@ -2118,7 +2126,11 @@ pub extern "C" fn clashhm_native_core_is_running() -> c_int {
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_get_proxies_json() -> *mut c_char {
     let guard = state().lock().unwrap();
-    into_c_string(proxies_json(&guard.groups, &guard.proxies))
+    into_c_string(proxies_json(
+        &guard.groups,
+        &guard.proxies,
+        &guard.delay_by_proxy,
+    ))
 }
 
 #[no_mangle]
@@ -2129,7 +2141,8 @@ pub extern "C" fn clashhm_native_core_parse_proxies_json(
         return into_c_string("[]".to_string());
     };
     let (proxies, groups, _rules) = parse_clash_config(&config);
-    into_c_string(proxies_json(&groups, &proxies))
+    let delays = BTreeMap::new();
+    into_c_string(proxies_json(&groups, &proxies, &delays))
 }
 
 #[no_mangle]
@@ -2536,6 +2549,28 @@ rules:
         update_auto_group_selection(&mut groups, &delays);
 
         assert_eq!(groups[0].now, "B");
+    }
+
+    #[test]
+    fn proxy_json_reports_cached_latency() {
+        let proxies = vec![ProxyNode {
+            name: "A".to_string(),
+            proxy_type: "ss".to_string(),
+            fields: BTreeMap::new(),
+        }];
+        let groups = vec![ProxyGroup {
+            name: "Proxy".to_string(),
+            group_type: "select".to_string(),
+            now: "A".to_string(),
+            all: vec!["A".to_string()],
+        }];
+        let mut delays = BTreeMap::new();
+        delays.insert("A".to_string(), 123);
+
+        let json = proxies_json(&groups, &proxies, &delays);
+
+        assert!(json.contains("\"latency\":123"), "{json}");
+        assert!(json.contains("\"alive\":true"), "{json}");
     }
 
     #[test]

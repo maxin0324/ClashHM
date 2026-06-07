@@ -336,12 +336,51 @@ export struct ProxyPage {
         }
         break;
       }
+      await this.syncGroupStateFromExtension(context, extensionService, groupName);
       this.sourceMsg = 'Latency updated';
     } catch (e) {
       this.sourceMsg = `Latency test failed: ${String(e)}`;
       Logger.error('Latency test failed: %{public}s', String(e));
     } finally {
       this.testingGroup = '';
+    }
+  }
+
+  private async syncGroupStateFromExtension(context: common.UIAbilityContext, extensionService: NativeCoreExtensionService, groupName: string): Promise<void> {
+    try {
+      const result = await extensionService.getProxies();
+      if (!result.ok || !result.data) {
+        return;
+      }
+      const extensionGroups = JSON.parse(result.data) as ExtensionProxyGroup[];
+      const mappedGroups = this.mapExtensionGroups(extensionGroups);
+      for (const mappedGroup of mappedGroups) {
+        if (mappedGroup.name !== groupName) {
+          continue;
+        }
+        for (const group of this.groups) {
+          if (group.name !== groupName) {
+            continue;
+          }
+          group.now = mappedGroup.now;
+          for (const mappedNode of mappedGroup.nodes) {
+            for (const node of group.nodes) {
+              if (node.name === mappedNode.name) {
+                node.latency = mappedNode.latency;
+                node.alive = mappedNode.alive;
+                break;
+              }
+            }
+          }
+          if (this.selectionService && mappedGroup.now && group.all.indexOf(mappedGroup.now) >= 0) {
+            await this.selectionService.saveSelection(group.name, mappedGroup.now);
+            this.publishSelectionChanged(context, group.name, mappedGroup.now);
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      Logger.info('Sync proxy group from Extension failed: %{public}s', String(e));
     }
   }
 

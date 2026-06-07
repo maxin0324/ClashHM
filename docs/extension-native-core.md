@@ -95,7 +95,7 @@ Current repository state:
 - The UI process no longer starts the mihomo preview core on app launch, connect, disconnect, proxy refresh, or latency testing. Proxy refresh is config-backed; latency testing is executed through the Extension native-core while connected.
 - When Home appears, the UI queries Extension status and marks the connection as active if the Extension native core is still running.
 - While connected, UI traffic polling and the log page query the Extension command channel.
-- `testDelay` currently performs a native TCP connect probe to the parsed node server/port and feeds cached results into `url-test` / `fallback` group selection. Full Clash URL-test semantics are still pending.
+- `testDelay` currently performs a native TCP connect probe to the parsed node server/port, caches the result for `getProxies`, and feeds cached results into `url-test` / `fallback` group selection. Full Clash URL-test semantics are still pending.
 - `getStatus` returns structured runtime state: backend engine name, running flag, TUN fd, status text, last adapter/backend error, selected group/proxy, parsed proxy/group/rule counts, uptime, and last latency probe result.
 - `getTraffic` and `getConnections` are exposed through the native boundary. They currently return placeholders until shoes traffic accounting and connection tracking are wired.
 - `clash_bridge.cpp` exports optional NAPI functions prefixed with `nativeCore`.
