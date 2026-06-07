@@ -11,6 +11,7 @@ Current state:
 - Parses `proxies`, `proxy-groups`, `rules`, provider-expanded local `proxy-providers[].proxies`, YAML-native inline `proxy-providers[].proxies` referenced by group `use:`, and common YAML-native inline `rule-providers[].payload` referenced by `RULE-SET`.
 - Parses common Clash `rules` and maps `MATCH`, `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, `DST-PORT`, basic `GEOIP,PRIVATE/LAN`, and basic `GEOSITE,cn/geolocation-cn` to shoes TUN rules.
 - Expands common `RULE-SET` entries when their provider payload is already local/inline and can be converted into `DOMAIN`, `DOMAIN-SUFFIX`, `DOMAIN-KEYWORD`, `IP-CIDR`, `IP-CIDR6`, or `DST-PORT`.
+- Updates `url-test` and `fallback` group selections from cached native-core latency results.
 - Skips currently unsupported routing rules such as full MMDB/dat backed `GEOIP` / `GEOSITE` categories and unexpanded/advanced `RULE-SET`, then relies on the Clash `MATCH` rule or generated default rule for fallback routing. Status JSON includes `skippedRuleCount` and `skippedRuleTypes` for diagnostics.
 - Receives provider-expanded Clash config from the ArkTS config layer. Remote `proxy-providers` are materialized during subscription update; local provider nodes are expanded before the config is sent to the Extension.
 - Returns deterministic status from the embedded backend.
@@ -21,7 +22,7 @@ Current state:
 - Fails explicitly for unsupported outbound protocols or transports such as Hysteria2, TUIC, `network: grpc`, and `network: h2`. The vendored shoes client config does not currently expose Hysteria2/TUIC outbound variants, and Clash/Xray `network: h2` is not the same protocol as shoes/sing-box h2mux, so these must not be silently mapped to TCP or h2mux.
 - Applies proxy selection inside the Extension. Current running selections are recorded quickly and take effect on the next VPN core start; hot backend reload is still a later task. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
 - The patched shoes backend converts TUN UDP/53 DNS queries into DNS-over-TCP over the selected proxy chain. This avoids the common Trojan UDP gap where the VPN appears connected but domains cannot resolve.
-- Provides a basic TCP connect latency probe for parsed proxy nodes. Full Clash-style URL testing is still a later adapter task.
+- Provides a basic TCP connect latency probe for parsed proxy nodes and uses those results to update `url-test` / `fallback` group choices. Full Clash-style URL testing through every proxy protocol is still a later adapter task.
 - Returns structured runtime status with backend name, selected group/proxy, parsed object counts, uptime, last error, and last latency probe result.
 - Exposes traffic and connection APIs through the native boundary. Traffic totals and speeds are now sourced from the patched shoes TUN read/write path.
 

@@ -91,10 +91,11 @@ Current repository state:
 - Unsupported routing rules that the embedded shoes rule matcher still cannot model, including full MMDB/dat backed `GEOIP` / `GEOSITE` categories and unexpanded/advanced `RULE-SET`, are not represented as fake rules. The adapter currently skips them and relies on the Clash `MATCH` rule or generated default rule; status JSON reports `skippedRuleCount` and `skippedRuleTypes` so the UI/logs can explain partial rule coverage. Full parity requires backend rule-matcher work.
 - Unsupported client protocols such as Hysteria2 and TUIC fail explicitly because the vendored shoes client config does not expose matching outbound variants; adding real support requires client implementation in the backend, not only adapter YAML changes.
 - Proxy selection is applied in the Extension. If the embedded backend is already running, selecting a new proxy rebuilds the selected-node shoes config and restarts the TUN runner. Group selections can resolve to a real proxy, `DIRECT`, `REJECT`/`REJECT-DROP`, or another proxy group.
+- `url-test` and `fallback` groups update their selected node from native-core latency results. This is a selection improvement, not yet full Clash URL-test behavior because the current latency probe still measures proxy server TCP reachability rather than making the configured HTTP request through every protocol implementation.
 - The UI process no longer starts the mihomo preview core on app launch, connect, disconnect, proxy refresh, or latency testing. Proxy refresh is config-backed; latency testing is executed through the Extension native-core while connected.
 - When Home appears, the UI queries Extension status and marks the connection as active if the Extension native core is still running.
 - While connected, UI traffic polling and the log page query the Extension command channel.
-- `testDelay` currently performs a native TCP connect probe to the parsed node server/port. Full Clash URL-test semantics are still pending.
+- `testDelay` currently performs a native TCP connect probe to the parsed node server/port and feeds cached results into `url-test` / `fallback` group selection. Full Clash URL-test semantics are still pending.
 - `getStatus` returns structured runtime state: backend engine name, running flag, TUN fd, status text, last adapter/backend error, selected group/proxy, parsed proxy/group/rule counts, uptime, and last latency probe result.
 - `getTraffic` and `getConnections` are exposed through the native boundary. They currently return placeholders until shoes traffic accounting and connection tracking are wired.
 - `clash_bridge.cpp` exports optional NAPI functions prefixed with `nativeCore`.
@@ -172,7 +173,7 @@ This avoids assuming that NAPI state in the UI process is the same as NAPI state
 15. Produce and verify an actual OHOS Rust static library artifact in a DevEco/HarmonyOS SDK environment.
 16. Return explicit native-core adapter errors for unsupported high-impact routing rules and protocols instead of silently falling back to default routing. Done.
 17. Extend the Clash adapter to Hysteria2, TUIC, gRPC/H2 transports, full MMDB/dat backed GEOIP/GEOSITE, unexpanded/advanced RULE-SET forms, and full Clash rule parity.
-18. Replace the basic TCP latency probe with full Clash URL-test behavior, and wire real traffic/connections from the Extension core.
+18. Replace the basic TCP latency probe with full Clash URL-test behavior, and wire real traffic/connections from the Extension core. Partially done: `url-test` and `fallback` groups now consume cached native-core latency results for automatic selection.
 19. Stop starting mihomo in the UI process by default. Done.
 20. Restore UI connection state from Extension status after UI process recreation. Done.
 21. Route connected traffic polling and log-page reads through the Extension command channel. Done, with placeholder native counters until shoes accounting is wired.

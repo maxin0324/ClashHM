@@ -44,6 +44,7 @@ struct CoreState {
     proxies: Vec<ProxyNode>,
     groups: Vec<ProxyGroup>,
     rules: Vec<ClashRule>,
+    delay_by_proxy: BTreeMap<String, i32>,
     status: String,
     engine: String,
     started_at_ms: u128,
@@ -1211,6 +1212,53 @@ fn selected_target_for_group<'a>(group_name: &str, groups: &'a [ProxyGroup]) -> 
     }
 }
 
+fn best_url_test_target<'a>(
+    group: &'a ProxyGroup,
+    delay_by_proxy: &BTreeMap<String, i32>,
+) -> Option<&'a str> {
+    group
+        .all
+        .iter()
+        .filter_map(|name| {
+            let delay = *delay_by_proxy.get(name)?;
+            if delay > 0 {
+                Some((name.as_str(), delay))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(_, delay)| *delay)
+        .map(|(name, _)| name)
+}
+
+fn best_fallback_target<'a>(
+    group: &'a ProxyGroup,
+    delay_by_proxy: &BTreeMap<String, i32>,
+) -> Option<&'a str> {
+    group
+        .all
+        .iter()
+        .find(|name| delay_by_proxy.get(*name).copied().unwrap_or(-1) > 0)
+        .map(String::as_str)
+}
+
+fn update_auto_group_selection(groups: &mut [ProxyGroup], delay_by_proxy: &BTreeMap<String, i32>) {
+    for group in groups {
+        let group_type = group.group_type.to_ascii_lowercase();
+        let selected = if group_type == "url-test" {
+            best_url_test_target(group, delay_by_proxy)
+        } else if group_type == "fallback" {
+            best_fallback_target(group, delay_by_proxy)
+        } else {
+            None
+        }
+        .map(str::to_string);
+        if let Some(selected) = selected {
+            group.now = selected;
+        }
+    }
+}
+
 fn protocol_indent(indent: usize) -> String {
     " ".repeat(indent)
 }
@@ -2135,10 +2183,14 @@ pub extern "C" fn clashhm_native_core_test_delay(
     let Some(proxy) = proxy else {
         return -2;
     };
+    let tested_proxy_name = proxy.name.clone();
     let result = tcp_delay_ms(proxy, timeout_ms).unwrap_or_else(|code| code);
     drop(guard);
     let mut guard = state().lock().unwrap();
     guard.last_delay_ms = result;
+    guard.delay_by_proxy.insert(tested_proxy_name, result);
+    let delay_by_proxy = guard.delay_by_proxy.clone();
+    update_auto_group_selection(&mut guard.groups, &delay_by_proxy);
     result
 }
 
@@ -2448,6 +2500,42 @@ rules:
         assert!(shoes_config.contains("masks: \"cn\""));
         assert!(shoes_config.contains("type: direct"));
         assert!(shoes_config.contains("address: \"proxy.example.com:443\""));
+    }
+
+    #[test]
+    fn url_test_group_selects_lowest_cached_delay() {
+        let mut groups = vec![ProxyGroup {
+            name: "Auto".to_string(),
+            group_type: "url-test".to_string(),
+            now: "A".to_string(),
+            all: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        }];
+        let mut delays = BTreeMap::new();
+        delays.insert("A".to_string(), 300);
+        delays.insert("B".to_string(), 90);
+        delays.insert("C".to_string(), 0);
+
+        update_auto_group_selection(&mut groups, &delays);
+
+        assert_eq!(groups[0].now, "B");
+    }
+
+    #[test]
+    fn fallback_group_selects_first_available_cached_delay() {
+        let mut groups = vec![ProxyGroup {
+            name: "Fallback".to_string(),
+            group_type: "fallback".to_string(),
+            now: "A".to_string(),
+            all: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        }];
+        let mut delays = BTreeMap::new();
+        delays.insert("A".to_string(), 0);
+        delays.insert("B".to_string(), 120);
+        delays.insert("C".to_string(), 80);
+
+        update_auto_group_selection(&mut groups, &delays);
+
+        assert_eq!(groups[0].now, "B");
     }
 
     #[test]
