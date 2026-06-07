@@ -57,6 +57,9 @@ export class NapiClashService implements IClashService {
   }
 
   async getProxyGroupsAsync(): Promise<ProxyGroup[]> {
+    if (this.state !== ConnectState.CONNECTED) {
+      return this.cachedGroups;
+    }
     try {
       const result = await new NativeCoreExtensionService(this.context).getProxies();
       if (result.ok && result.data) {

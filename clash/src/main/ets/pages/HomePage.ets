@@ -1,13 +1,14 @@
 import { ConnectButton } from '../components/ConnectButton';
 import { TrafficStats } from '../components/TrafficStats';
 import { getClashService, IClashService } from '../services/ClashService';
-import { ConnectState, ConnectionMode, ProxyGroup } from '../models/ClashConfig';
+import { ConnectState, ConnectionMode, ProxyGroup, ProxyNode } from '../models/ClashConfig';
 import { TrafficData, createEmptyTraffic } from '../models/TrafficData';
 import { TrafficMonitor } from '../services/TrafficMonitor';
 import { SubscriptionService } from '../services/SubscriptionService';
 import { ConfigManager } from '../services/ConfigManager';
 import { ProxySelectionService } from '../services/ProxySelectionService';
 import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
+import { callNativeCoreParseProxies } from '../services/NativeClash';
 import { vpnExtension } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { common, Want } from '@kit.AbilityKit';
@@ -19,6 +20,21 @@ class NativeCoreStatusInfo {
   running: boolean = false;
   engine: string = '';
   status: string = '';
+}
+
+interface ParsedProxyNode {
+  name?: string;
+  type?: string;
+  alive?: boolean;
+  latency?: number;
+}
+
+interface ParsedProxyGroup {
+  name?: string;
+  type?: string;
+  now?: string;
+  all?: string[];
+  nodes?: ParsedProxyNode[];
 }
 
 @Component
@@ -240,7 +256,7 @@ export struct HomePage {
       const selections = selectionService.getSelections();
       const configManager = new ConfigManager(context);
       const mergedConfig = configManager.generateMergedConfig(activeSub.filePath);
-      const groups = configManager.parseProxyGroupsFromContent(mergedConfig);
+      const groups = this.parseProxyGroupsForSummary(mergedConfig, configManager);
       let selectedGroup = '';
       let selectedProxy = '';
 
@@ -273,6 +289,57 @@ export struct HomePage {
     } catch (e) {
       Logger.error('Failed to refresh profile summary: %{public}s', String(e));
     }
+  }
+
+  private parseProxyGroupsForSummary(configText: string, configManager: ConfigManager): ProxyGroup[] {
+    if (configText) {
+      try {
+        const data = callNativeCoreParseProxies(configText);
+        if (data) {
+          const parsed = JSON.parse(data) as ParsedProxyGroup[];
+          const groups = this.mapParsedProxyGroups(parsed);
+          if (groups.length > 0) {
+            return groups;
+          }
+        }
+      } catch (e) {
+        Logger.info('Native proxy summary parser unavailable: %{public}s', String(e));
+      }
+    }
+    return configManager.parseProxyGroupsFromContent(configText);
+  }
+
+  private mapParsedProxyGroups(groups: ParsedProxyGroup[]): ProxyGroup[] {
+    const mapped: ProxyGroup[] = [];
+    for (const group of groups) {
+      const groupName = group.name === undefined ? '' : group.name;
+      const all = group.all === undefined ? [] : group.all;
+      if (!groupName || all.length === 0) {
+        continue;
+      }
+      const parsedNodes = group.nodes === undefined ? [] : group.nodes;
+      const nodes: ProxyNode[] = parsedNodes.map((node: ParsedProxyNode) => {
+        const mappedNode: ProxyNode = {
+          name: node.name === undefined ? '' : node.name,
+          type: node.type === undefined || node.type === '' ? 'proxy' : node.type,
+          server: '',
+          port: 0,
+          latency: node.latency === undefined ? -1 : node.latency,
+          alive: node.alive === undefined ? true : node.alive,
+        };
+        return mappedNode;
+      });
+      const mappedGroup: ProxyGroup = {
+        name: groupName,
+        type: group.type === undefined || group.type === '' ? 'select' : group.type,
+        now: group.now === undefined || group.now === '' ? all[0] : group.now,
+        all,
+        nodes,
+        expanded: false,
+      };
+      mapped.push(mappedGroup);
+    }
+    return mapped;
   }
 
   private async refreshExtensionConnectionState(): Promise<void> {

@@ -93,8 +93,19 @@ export struct ProxyPage {
     const loadResult = new ProxyLoadResult();
     const details: string[] = [];
 
-    const connected = this.service !== null && this.service.getState() === ConnectState.CONNECTED;
-    if (connected) {
+    const localGroups = await this.loadProxyGroupsFromActiveSubscription(context, details);
+    if (localGroups.groups.length > 0) {
+      localGroups.fromExtension = this.isServiceConnected();
+      if (localGroups.fromExtension) {
+        details.push('extension: connected; using local config list for stable display');
+      } else {
+        details.push('extension: skipped while disconnected');
+      }
+      localGroups.detail = details.join('\n');
+      return localGroups;
+    }
+
+    if (this.isServiceConnected()) {
       const extensionGroups = await this.loadProxyGroupsFromExtension(context, details);
       if (extensionGroups.length > 0) {
         loadResult.groups = extensionGroups;
@@ -107,13 +118,12 @@ export struct ProxyPage {
       details.push('extension: skipped while disconnected');
     }
 
-    const localGroups = await this.loadProxyGroupsFromActiveSubscription(context, details);
-    if (localGroups.groups.length > 0) {
-      return localGroups;
-    }
-
     loadResult.detail = details.join('\n');
     return loadResult;
+  }
+
+  private isServiceConnected(): boolean {
+    return this.service !== null && this.service.getState() === ConnectState.CONNECTED;
   }
 
   private async loadProxyGroupsFromActiveSubscription(context: common.UIAbilityContext, details: string[]): Promise<ProxyLoadResult> {
@@ -286,7 +296,7 @@ export struct ProxyPage {
       if (this.selectionService) {
         await this.selectionService.saveSelection(groupName, proxyName);
       }
-      if (this.loadedFromExtension || (this.service && this.service.getState() === ConnectState.CONNECTED)) {
+      if (this.isServiceConnected()) {
         try {
           await new NativeCoreExtensionService(context).selectProxy(groupName, proxyName);
         } catch (e) {
@@ -307,7 +317,7 @@ export struct ProxyPage {
   }
 
   private async testGroupLatency(groupName: string): Promise<void> {
-    if (!this.loadedFromExtension) {
+    if (!this.isServiceConnected()) {
       this.sourceMsg = 'Connect VPN to test latency';
       return;
     }
@@ -458,7 +468,7 @@ export struct ProxyPage {
             ListItem() {
               ProxyGroupCard({
                 group: group,
-                canTestLatency: this.loadedFromExtension && group.nodes.length > 0,
+                canTestLatency: this.isServiceConnected() && group.nodes.length > 0,
                 isTesting: this.testingGroup === group.name,
                 onSelectProxy: (gName: string, pName: string) => {
                   this.selectProxy(gName, pName);
