@@ -106,8 +106,6 @@ if [[ "${CLASHHM_SKIP_ARCHIVE_STRIP:-0}" != "1" ]] && command -v strip >/dev/nul
     --remove-section=.note \
     --remove-section=.note.* \
     --remove-section=.llvm_addrsig \
-    --remove-section=.eh_frame \
-    --remove-section=.eh_frame_hdr \
     "$OUT_DIR/libclashhm_native_core.a" || true
 fi
 cp "$ROOT_DIR/src/native_core.h" "$OUT_DIR/native_core.h"
