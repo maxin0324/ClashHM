@@ -596,7 +596,10 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
     Some(proxy)
 }
 
-fn group_from_yaml(value: &serde_yaml::Value) -> Option<ProxyGroup> {
+fn group_from_yaml(
+    value: &serde_yaml::Value,
+    provider_proxy_names: &BTreeMap<String, Vec<String>>,
+) -> Option<ProxyGroup> {
     let serde_yaml::Value::Mapping(mapping) = value else {
         return None;
     };
@@ -605,8 +608,17 @@ fn group_from_yaml(value: &serde_yaml::Value) -> Option<ProxyGroup> {
         return None;
     }
     let mut names = yaml_sequence_strings(yaml_mapping_get(mapping, "proxies"));
-    if names.is_empty() {
-        names = yaml_sequence_strings(yaml_mapping_get(mapping, "use"));
+    let uses = yaml_sequence_strings(yaml_mapping_get(mapping, "use"));
+    for provider_name in uses {
+        if let Some(provider_names) = provider_proxy_names.get(&provider_name) {
+            for proxy_name in provider_names {
+                if !names.contains(proxy_name) {
+                    names.push(proxy_name.clone());
+                }
+            }
+        } else if names.is_empty() && !names.contains(&provider_name) {
+            names.push(provider_name);
+        }
     }
     let now = yaml_mapping_get(mapping, "now")
         .map(yaml_value_to_string)
@@ -623,6 +635,71 @@ fn group_from_yaml(value: &serde_yaml::Value) -> Option<ProxyGroup> {
     })
 }
 
+fn rule_provider_entries_from_yaml(value: &serde_yaml::Value) -> Vec<String> {
+    if let serde_yaml::Value::Mapping(mapping) = value {
+        for key in ["payload", "rules"] {
+            if let Some(serde_yaml::Value::Sequence(items)) = yaml_mapping_get(mapping, key) {
+                return items
+                    .iter()
+                    .map(yaml_value_to_string)
+                    .filter(|item| !item.is_empty())
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn rule_provider_behavior_from_yaml(value: &serde_yaml::Value) -> String {
+    if let serde_yaml::Value::Mapping(mapping) = value {
+        return yaml_mapping_get(mapping, "behavior")
+            .map(yaml_value_to_string)
+            .filter(|item| !item.is_empty())
+            .unwrap_or_else(|| "classical".to_string())
+            .to_ascii_lowercase();
+    }
+    "classical".to_string()
+}
+
+fn rule_from_provider_entry(entry: &str, behavior: &str, target: &str) -> Option<ClashRule> {
+    let value = trim_quote(entry.trim());
+    if value.is_empty() || value.starts_with('#') || target.is_empty() {
+        return None;
+    }
+    if behavior == "domain" {
+        let payload = value
+            .trim_start_matches("+.")
+            .trim_start_matches('.')
+            .to_string();
+        if payload.is_empty() {
+            return None;
+        }
+        return Some(ClashRule {
+            rule_type: "DOMAIN-SUFFIX".to_string(),
+            payload,
+            target: target.to_string(),
+        });
+    }
+    if behavior == "ipcidr" || behavior == "ip-cidr" {
+        return Some(ClashRule {
+            rule_type: if value.contains(':') {
+                "IP-CIDR6".to_string()
+            } else {
+                "IP-CIDR".to_string()
+            },
+            payload: value,
+            target: target.to_string(),
+        });
+    }
+    let Some(rule) = parse_rule_line(&value) else {
+        return None;
+    };
+    Some(ClashRule {
+        target: target.to_string(),
+        ..rule
+    })
+}
+
 fn parse_clash_config_yaml(
     config: &str,
 ) -> Option<(Vec<ProxyNode>, Vec<ProxyGroup>, Vec<ClashRule>)> {
@@ -633,6 +710,8 @@ fn parse_clash_config_yaml(
     let mut proxies = Vec::new();
     let mut groups = Vec::new();
     let mut rules = Vec::new();
+    let mut provider_proxy_names: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut rule_providers: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
 
     if let Some(serde_yaml::Value::Sequence(items)) = yaml_mapping_get(&mapping, "proxies") {
         for item in items {
@@ -644,23 +723,44 @@ fn parse_clash_config_yaml(
     if let Some(serde_yaml::Value::Mapping(providers)) =
         yaml_mapping_get(&mapping, "proxy-providers")
     {
-        for provider in providers.values() {
+        for (provider_key, provider) in providers {
+            let provider_name = yaml_value_to_string(provider_key);
+            let mut names = Vec::new();
             if let serde_yaml::Value::Mapping(provider_map) = provider {
                 if let Some(serde_yaml::Value::Sequence(items)) =
                     yaml_mapping_get(provider_map, "proxies")
                 {
                     for item in items {
                         if let Some(proxy) = proxy_from_yaml(item) {
+                            names.push(proxy.name.clone());
                             proxies.push(proxy);
                         }
                     }
                 }
             }
+            if !provider_name.is_empty() && !names.is_empty() {
+                provider_proxy_names.insert(provider_name, names);
+            }
+        }
+    }
+    if let Some(serde_yaml::Value::Mapping(providers)) =
+        yaml_mapping_get(&mapping, "rule-providers")
+    {
+        for (provider_key, provider) in providers {
+            let provider_name = yaml_value_to_string(provider_key);
+            if provider_name.is_empty() {
+                continue;
+            }
+            let behavior = rule_provider_behavior_from_yaml(provider);
+            let entries = rule_provider_entries_from_yaml(provider);
+            if !entries.is_empty() {
+                rule_providers.insert(provider_name, (behavior, entries));
+            }
         }
     }
     if let Some(serde_yaml::Value::Sequence(items)) = yaml_mapping_get(&mapping, "proxy-groups") {
         for item in items {
-            if let Some(group) = group_from_yaml(item) {
+            if let Some(group) = group_from_yaml(item, &provider_proxy_names) {
                 groups.push(group);
             }
         }
@@ -669,7 +769,21 @@ fn parse_clash_config_yaml(
         for item in items {
             let line = yaml_value_to_string(item);
             if let Some(rule) = parse_rule_line(&line) {
-                rules.push(rule);
+                if rule.rule_type == "RULE-SET" {
+                    if let Some((behavior, entries)) = rule_providers.get(&rule.payload) {
+                        for entry in entries {
+                            if let Some(expanded_rule) =
+                                rule_from_provider_entry(entry, behavior, &rule.target)
+                            {
+                                rules.push(expanded_rule);
+                            }
+                        }
+                    } else {
+                        rules.push(rule);
+                    }
+                } else {
+                    rules.push(rule);
+                }
             }
         }
     }
@@ -1121,7 +1235,11 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             "{pad}type: shadowsocks\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(cipher),
             yaml_quote(password),
-            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         ));
     }
 
@@ -1138,7 +1256,11 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             "{pad}type: snell\n{pad}cipher: {}\n{pad}password: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(cipher),
             yaml_quote(password),
-            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         ));
     }
 
@@ -1178,7 +1300,11 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
             "{pad}type: vmess\n{pad}cipher: {}\n{pad}user_id: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(if cipher.is_empty() { "any" } else { cipher }),
             yaml_quote(user_id),
-            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         );
         append_h2mux_yaml(proxy, &mut out, &pad);
         return Ok(out);
@@ -1192,7 +1318,11 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
         let mut out = format!(
             "{pad}type: vless\n{pad}user_id: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(user_id),
-            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         );
         append_h2mux_yaml(proxy, &mut out, &pad);
         return Ok(out);
@@ -1203,7 +1333,10 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
         if password.is_empty() {
             return Err(format!("trojan proxy {} missing password", proxy.name));
         }
-        let mut out = format!("{pad}type: trojan\n{pad}password: {}\n", yaml_quote(password));
+        let mut out = format!(
+            "{pad}type: trojan\n{pad}password: {}\n",
+            yaml_quote(password)
+        );
         append_h2mux_yaml(proxy, &mut out, &pad);
         return Ok(out);
     }
@@ -1216,7 +1349,11 @@ fn build_base_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Strin
         return Ok(format!(
             "{pad}type: anytls\n{pad}password: {}\n{pad}udp_enabled: {}\n",
             yaml_quote(password),
-            if proxy_udp_enabled(proxy) { "true" } else { "false" }
+            if proxy_udp_enabled(proxy) {
+                "true"
+            } else {
+                "false"
+            }
         ));
     }
 
@@ -1825,7 +1962,9 @@ pub extern "C" fn clashhm_native_core_get_proxies_json() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn clashhm_native_core_parse_proxies_json(clash_config: *const c_char) -> *mut c_char {
+pub extern "C" fn clashhm_native_core_parse_proxies_json(
+    clash_config: *const c_char,
+) -> *mut c_char {
     let Ok(config) = cstr_to_string(clash_config) else {
         return into_c_string("[]".to_string());
     };
@@ -2035,6 +2174,75 @@ rules:
         );
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
         assert!(shoes_config.contains("address: \"a.example.com:443\""));
+    }
+
+    #[test]
+    fn expands_yaml_proxy_provider_use_entries() {
+        let config = r#"
+proxy-providers:
+  hk:
+    type: file
+    path: ./hk.yaml
+    proxies:
+      - name: HK 1
+        type: ss
+        server: hk1.example.com
+        port: 443
+        cipher: aes-128-gcm
+        password: secret
+      - name: HK 2
+        type: ss
+        server: hk2.example.com
+        port: 443
+        cipher: aes-128-gcm
+        password: secret
+proxy-groups:
+  - name: Proxy
+    type: select
+    use:
+      - hk
+rules:
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        assert_eq!(proxies.len(), 2);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].all, vec!["HK 1".to_string(), "HK 2".to_string()]);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("address: \"hk1.example.com:443\""));
+    }
+
+    #[test]
+    fn expands_yaml_rule_provider_rule_set_entries() {
+        let config = r#"
+proxies:
+  - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - A
+rule-providers:
+  private:
+    type: inline
+    behavior: domain
+    payload:
+      - +.example.com
+      - test.local
+rules:
+  - RULE-SET,private,DIRECT
+  - MATCH,Proxy
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-SUFFIX" && rule.payload == "example.com"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.rule_type == "DOMAIN-SUFFIX" && rule.payload == "test.local"));
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("masks: \"example.com\""));
+        assert!(shoes_config.contains("masks: \"test.local\""));
     }
 
     #[test]
