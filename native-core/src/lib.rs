@@ -258,6 +258,14 @@ fn proxy_from_flow(line: &str) -> Option<ProxyNode> {
     if !ws_host.is_empty() {
         assign_proxy_field(&mut proxy, "ws-host", ws_host);
     }
+    let h2_path = flow_value(line, "h2-opts.path");
+    if !h2_path.is_empty() {
+        assign_proxy_field(&mut proxy, "h2-path", h2_path);
+    }
+    let h2_host = flow_value(line, "h2-opts.host");
+    if !h2_host.is_empty() {
+        assign_proxy_field(&mut proxy, "h2-host", h2_host);
+    }
     let reality_public_key = flow_value(line, "reality-opts.public-key");
     if !reality_public_key.is_empty() {
         assign_proxy_field(&mut proxy, "public-key", reality_public_key);
@@ -437,10 +445,21 @@ fn assign_h2mux_opt(proxy: &mut ProxyNode, key: &str, value: String) {
     }
 }
 
+fn assign_h2_transport_opt(proxy: &mut ProxyNode, key: &str, value: String) {
+    match key {
+        "path" => assign_proxy_field(proxy, "h2-path", value),
+        "host" | "Host" => assign_proxy_field(proxy, "h2-host", value),
+        _ => {
+            proxy.fields.insert(format!("h2-{key}"), value);
+        }
+    }
+}
+
 fn assign_proxy_nested_field(proxy: &mut ProxyNode, section: &str, key: &str, value: String) {
     match section {
         "plugin-opts" => assign_plugin_opt(proxy, key, value),
         "ws-opts" | "ws-headers" => assign_ws_opt(proxy, key, value),
+        "h2-opts" | "http2-opts" => assign_h2_transport_opt(proxy, key, value),
         "reality-opts" => assign_reality_opt(proxy, key, value),
         "tls-opts" => assign_tls_opt(proxy, key, value),
         "h2mux" | "mux" | "smux" => assign_h2mux_opt(proxy, key, value),
@@ -563,6 +582,8 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
         "h2mux-min-streams",
         "h2mux-max-streams",
         "h2mux-padding",
+        "h2-path",
+        "h2-host",
         "plugin",
         "shadow-tls-password",
         "shadowtls-password",
@@ -584,6 +605,8 @@ fn proxy_from_yaml(value: &serde_yaml::Value) -> Option<ProxyNode> {
     for section in [
         "plugin-opts",
         "ws-opts",
+        "h2-opts",
+        "http2-opts",
         "reality-opts",
         "tls-opts",
         "h2mux",
@@ -889,7 +912,13 @@ fn parse_clash_config_fallback(config: &str) -> (Vec<ProxyNode>, Vec<ProxyGroup>
                 }
                 if matches!(
                     trimmed,
-                    "plugin-opts:" | "ws-opts:" | "headers:" | "reality-opts:" | "tls-opts:"
+                    "plugin-opts:"
+                        | "ws-opts:"
+                        | "h2-opts:"
+                        | "http2-opts:"
+                        | "headers:"
+                        | "reality-opts:"
+                        | "tls-opts:"
                 ) {
                     if trimmed == "headers:" && proxy_nested_section != "ws-opts" {
                         continue;
@@ -1480,6 +1509,46 @@ fn wrap_websocket(proxy: &ProxyNode, inner: String, indent: usize) -> String {
     out
 }
 
+fn first_csv_value(value: &str) -> String {
+    value.split(',').next().map(trim_quote).unwrap_or_default()
+}
+
+fn normalize_http_path(path: &str) -> String {
+    if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    }
+}
+
+fn wrap_http2_transport(proxy: &ProxyNode, inner: String, indent: usize) -> String {
+    let pad = protocol_indent(indent);
+    let inner_pad = protocol_indent(indent + 2);
+    let path = normalize_http_path(proxy_field_any(proxy, &["h2-path", "path"]));
+    let host = first_csv_value(proxy_field_any(
+        proxy,
+        &["h2-host", "host", "servername", "sni"],
+    ));
+    let host = if host.is_empty() {
+        proxy_field(proxy, "server").to_string()
+    } else {
+        host
+    };
+    let mut out = format!("{pad}type: h2\n{pad}path: {}\n", yaml_quote(&path));
+    if !host.is_empty() {
+        out.push_str(&format!("{pad}host: {}\n", yaml_quote(&host)));
+    }
+    out.push_str(&format!("{pad}protocol:\n"));
+    for line in inner.lines() {
+        out.push_str(&inner_pad);
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
     let pad = protocol_indent(indent);
     let inner_pad = protocol_indent(indent + 2);
@@ -1513,8 +1582,13 @@ fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
     }
     if proxy.proxy_type.eq_ignore_ascii_case("naive")
         || proxy.proxy_type.eq_ignore_ascii_case("naiveproxy")
+        || proxy_field(proxy, "network").eq_ignore_ascii_case("h2")
+        || proxy_field(proxy, "network").eq_ignore_ascii_case("http")
+        || proxy_field(proxy, "network").eq_ignore_ascii_case("http2")
     {
-        out.push_str(&format!("{pad}alpn_protocols: \"h2\"\n"));
+        if alpn.is_empty() {
+            out.push_str(&format!("{pad}alpn_protocols: \"h2\"\n"));
+        }
     }
     out.push_str(&format!("{pad}protocol:\n"));
     for line in inner.lines() {
@@ -1598,6 +1672,8 @@ fn build_proxy_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Stri
     let network = proxy_field(proxy, "network").to_lowercase();
     if network == "ws" || network == "websocket" {
         protocol = wrap_websocket(proxy, protocol, indent);
+    } else if network == "h2" || network == "http" || network == "http2" {
+        protocol = wrap_http2_transport(proxy, protocol, indent);
     } else if !network.is_empty() && network != "tcp" {
         return Err(unsupported_network_error(proxy, &network));
     }
@@ -2917,10 +2993,20 @@ proxy-groups:
     }
 
     #[test]
-    fn rejects_unsupported_h2_transport_instead_of_mapping_to_h2mux() {
+    fn builds_h2_transport_without_mapping_to_h2mux() {
         let config = r#"
 proxies:
-  - { name: VLESS H2, type: vless, server: h2.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: h2 }
+  - name: VLESS H2
+    type: vless
+    server: h2.example.com
+    port: 443
+    uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0
+    tls: true
+    network: h2
+    h2-opts:
+      path: /vless
+      host:
+        - cdn.example.com
 proxy-groups:
   - name: Proxy
     type: select
@@ -2928,8 +3014,19 @@ proxy-groups:
       - VLESS H2
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
-        let error = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap_err();
-        assert!(error.contains("not the same as shoes h2mux"), "{error}");
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("type: tls"), "{shoes_config}");
+        assert!(
+            shoes_config.contains("alpn_protocols: \"h2\""),
+            "{shoes_config}"
+        );
+        assert!(shoes_config.contains("type: h2"), "{shoes_config}");
+        assert!(shoes_config.contains("path: \"/vless\""), "{shoes_config}");
+        assert!(
+            shoes_config.contains("host: \"cdn.example.com\""),
+            "{shoes_config}"
+        );
+        assert!(!shoes_config.contains("h2mux:"), "{shoes_config}");
     }
 
     #[test]
@@ -3294,6 +3391,26 @@ proxy-groups:
     type: select
     proxies:
       - VMess WS
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(
+            shoes::config::load_config_str(&shoes_config).is_ok(),
+            "{shoes_config}"
+        );
+    }
+
+    #[cfg(feature = "shoes-backend")]
+    #[test]
+    fn generated_h2_transport_config_is_parseable_by_shoes() {
+        let config = r#"
+proxies:
+  - { name: VLESS H2, type: vless, server: h2.example.com, port: 443, uuid: b85798ef-e9dc-46a4-9a87-8da4499d36d0, tls: true, network: h2, h2-opts: { path: /h2, host: cdn.example.com } }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - VLESS H2
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();

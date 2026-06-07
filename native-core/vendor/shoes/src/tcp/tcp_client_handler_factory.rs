@@ -7,12 +7,12 @@ use log::debug;
 use crate::anytls::{AnyTlsClientHandler, PaddingFactory};
 use crate::client_proxy_selector::{ClientProxySelector, ConnectAction, ConnectRule};
 use crate::config::{
-    ClientProxyConfig, RuleActionConfig, RuleConfig, ShadowsocksConfig, TlsClientConfig,
-    WebsocketClientConfig,
+    ClientProxyConfig, Http2TransportClientConfig, RuleActionConfig, RuleConfig,
+    ShadowsocksConfig, TlsClientConfig, WebsocketClientConfig,
 };
 use crate::h2mux::H2MuxClientHandler;
 use crate::http_handler::HttpTcpClientHandler;
-use crate::naiveproxy::NaiveProxyTcpClientHandler;
+use crate::naiveproxy::{H2TransportTcpClientHandler, NaiveProxyTcpClientHandler};
 use crate::port_forward_handler::PortForwardClientHandler;
 use crate::resolver::Resolver;
 use crate::rustls_config_util::create_client_config;
@@ -331,6 +331,20 @@ pub fn create_tcp_client_handler(
                 matching_headers.map(|h| h.into_iter().collect()),
                 ping_type,
                 handler,
+            ))
+        }
+        ClientProxyConfig::Http2Transport(http2_transport_config) => {
+            let Http2TransportClientConfig {
+                path,
+                host,
+                headers,
+                protocol,
+            } = http2_transport_config;
+
+            let handler = create_tcp_client_handler(*protocol, None, resolver.clone());
+
+            Box::new(H2TransportTcpClientHandler::new(
+                path, host, headers, handler,
             ))
         }
         ClientProxyConfig::PortForward => Box::new(PortForwardClientHandler),

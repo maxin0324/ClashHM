@@ -410,6 +410,8 @@ pub enum ClientProxyConfig {
     },
     #[serde(alias = "ws")]
     Websocket(WebsocketClientConfig),
+    #[serde(rename = "h2", alias = "http2")]
+    Http2Transport(Http2TransportClientConfig),
     #[serde(alias = "noop")]
     PortForward,
     /// AnyTLS outbound protocol
@@ -457,6 +459,7 @@ impl ClientProxyConfig {
             ClientProxyConfig::ShadowTls { .. } => "ShadowTLS",
             ClientProxyConfig::Vmess { .. } => "VMess",
             ClientProxyConfig::Websocket(..) => "WebSocket",
+            ClientProxyConfig::Http2Transport(..) => "HTTP/2 Transport",
             ClientProxyConfig::PortForward => "PortForward",
             ClientProxyConfig::Anytls { .. } => "AnyTLS",
             ClientProxyConfig::Naiveproxy { .. } => "NaiveProxy",
@@ -506,6 +509,17 @@ pub struct WebsocketClientConfig {
     pub matching_headers: Option<HashMap<String, String>>,
     #[serde(default, skip_serializing_if = "WebsocketPingType::is_default")]
     pub ping_type: WebsocketPingType,
+    pub protocol: Box<ClientProxyConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Http2TransportClientConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
     pub protocol: Box<ClientProxyConfig>,
 }
 

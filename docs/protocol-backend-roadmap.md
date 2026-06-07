@@ -31,6 +31,7 @@ The current embedded backend supports the selected-node path for:
 - VLESS
 - Trojan
 - TLS / WebSocket / Reality / ShadowTLS wrappers
+- Clash/Xray HTTP/2 transport wrapper
 - v2ray-plugin WebSocket wrapping
 - VMess / VLESS / Trojan `mux` / `h2mux`
 
@@ -49,11 +50,11 @@ The current embedded backend supports the selected-node path for:
 | AnyTLS | Supported | Client outbound exists in shoes. |
 | NaiveProxy | Supported | Uses shoes NaiveProxy HTTP/2 CONNECT implementation. |
 | `network: ws` / `ws-opts` | Supported | Maps to shoes WebSocket wrapper. |
+| Clash/Xray `network: h2` | Initial support | Uses a real HTTP/2 transport wrapper with `h2-opts.path` and `h2-opts.host`; not mapped to shoes h2mux. Needs more real-device coverage across subscription variants. |
 | Clash `mux` / `h2mux` / `smux` options | Partially supported | Maps to shoes sing-box-style h2mux for VMess/VLESS/Trojan. This is not Clash/Xray `network: h2`. |
 | Hysteria2 / HY2 | Unsupported | Shoes currently has server-side Hysteria2 code, but no client outbound config/handler. |
 | TUIC / TUIC v5 | Unsupported | Shoes currently has server-side TUIC code, but no client outbound config/handler. |
 | `network: grpc` | Unsupported | Shoes has no Clash/Xray gRPC client transport wrapper. |
-| Clash/Xray `network: h2` | Unsupported | Ordinary HTTP/2 transport with path/host options; not equivalent to shoes h2mux. |
 
 ## Remaining Protocols
 
@@ -105,14 +106,19 @@ This is not equivalent to plain TCP.
 
 ### Clash/Xray `network: h2`
 
-Estimated size: medium to large.
+Initial support exists.
 
-Required backend work:
+Implemented:
 
 - HTTP/2 transport client
 - TLS / SNI / host handling
-- path and header behavior
+- path and host behavior
+
+Remaining work:
+
 - tests for VMess/VLESS/Trojan over HTTP/2 transport
+- broader real-device coverage with real subscription variants
+- optional extra header behavior if subscriptions require it
 
 This is not equivalent to shoes/sing-box `h2mux`; it must not be mapped to `h2mux`.
 
@@ -142,7 +148,7 @@ Current behavior is explicit diagnostic fallback: unsupported rules are skipped,
 
 1. Finish rule matcher expansion before new transport protocols.
 2. Add local MMDB/dat based full `GEOIP` / `GEOSITE` support.
-3. Add gRPC and HTTP/2 transports for VMess/VLESS/Trojan.
+3. Add gRPC transport for VMess/VLESS/Trojan.
 4. Add HY2 and TUIC only after the backend has a real QUIC client path.
 
 Reasoning: rule and DNS correctness affects every existing protocol, while HY2/TUIC only affect subscriptions that use those node types.
