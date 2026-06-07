@@ -251,6 +251,17 @@ export struct HomePage {
       }
 
       this.profileName = activeSub.name;
+
+      if (this.service && this.service.getState() === ConnectState.CONNECTED) {
+        const extensionGroups = await this.loadExtensionProxyGroupsForSummary(context);
+        const extensionGroup = this.pickPrimaryProxyGroup(extensionGroups);
+        if (extensionGroup) {
+          this.selectedProxyGroup = extensionGroup.name;
+          this.selectedProxyName = extensionGroup.now || (extensionGroup.all.length > 0 ? extensionGroup.all[0] : 'Not selected');
+          return;
+        }
+      }
+
       const selectionService = new ProxySelectionService();
       await selectionService.init(context);
       const selections = selectionService.getSelections();
@@ -307,6 +318,20 @@ export struct HomePage {
       }
     }
     return configManager.parseProxyGroupsFromContent(configText);
+  }
+
+  private async loadExtensionProxyGroupsForSummary(context: common.UIAbilityContext): Promise<ProxyGroup[]> {
+    try {
+      const result = await new NativeCoreExtensionService(context).getProxies();
+      if (!result.ok || !result.data) {
+        return [];
+      }
+      const parsed = JSON.parse(result.data) as ParsedProxyGroup[];
+      return this.mapParsedProxyGroups(parsed);
+    } catch (e) {
+      Logger.info('Extension proxy summary unavailable: %{public}s', String(e));
+      return [];
+    }
   }
 
   private mapParsedProxyGroups(groups: ParsedProxyGroup[]): ProxyGroup[] {
