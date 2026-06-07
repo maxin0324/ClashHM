@@ -99,5 +99,16 @@ fi
 OUT_DIR="$ROOT_DIR/../clash/src/main/cpp/native-core"
 mkdir -p "$OUT_DIR"
 cp "$TARGET_DIR/$TARGET/release/libclashhm_native_core.a" "$OUT_DIR/libclashhm_native_core.a"
+if [[ "${CLASHHM_SKIP_ARCHIVE_STRIP:-0}" != "1" ]] && command -v strip >/dev/null 2>&1; then
+  strip \
+    --strip-unneeded \
+    --remove-section=.comment \
+    --remove-section=.note \
+    --remove-section=.note.* \
+    --remove-section=.llvm_addrsig \
+    --remove-section=.eh_frame \
+    --remove-section=.eh_frame_hdr \
+    "$OUT_DIR/libclashhm_native_core.a" || true
+fi
 cp "$ROOT_DIR/src/native_core.h" "$OUT_DIR/native_core.h"
 echo "native core static library copied to $OUT_DIR"

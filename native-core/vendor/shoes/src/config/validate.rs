@@ -52,6 +52,7 @@ pub fn create_server_configs(all_configs: Vec<Config>) -> std::io::Result<Valida
         vec![RuleConfig {
             masks: OneOrSome::One(NetLocationMask::ANY),
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: None,
                 client_chains: NoneOrSome::One(ClientChain::default()),
@@ -63,6 +64,7 @@ pub fn create_server_configs(all_configs: Vec<Config>) -> std::io::Result<Valida
         vec![RuleConfig {
             masks: OneOrSome::One(NetLocationMask::ANY),
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action: RuleActionConfig::Block,
         }],
     );
@@ -1511,6 +1513,7 @@ mod tests {
                 rules: OneOrSome::One(RuleConfig {
                     masks: OneOrSome::One(NetLocationMask::ANY),
                     domain_keywords: Vec::new(),
+                    geoip_countries: Vec::new(),
                     action: RuleActionConfig::Allow {
                         override_address: None,
                         client_chains: NoneOrSome::One(ClientChain::default()),

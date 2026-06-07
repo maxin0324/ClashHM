@@ -1,10 +1,11 @@
 use log::{debug, error};
 use lru::LruCache;
+use maxminddb::Reader;
 use parking_lot::RwLock;
 use std::hash::Hash;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::address::{Address, NetLocation, ResolvedLocation};
 use crate::address::{AddressMask, NetLocationMask};
@@ -114,6 +115,7 @@ impl RoutingCache {
 pub struct ConnectRule {
     pub masks: Vec<NetLocationMask>,
     pub domain_keywords: Vec<String>,
+    pub geoip_countries: Vec<String>,
     pub action: ConnectAction,
 }
 
@@ -122,6 +124,7 @@ impl ConnectRule {
         Self {
             masks,
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action,
         }
     }
@@ -129,11 +132,13 @@ impl ConnectRule {
     pub fn with_domain_keywords(
         masks: Vec<NetLocationMask>,
         domain_keywords: Vec<String>,
+        geoip_countries: Vec<String>,
         action: ConnectAction,
     ) -> Self {
         Self {
             masks,
             domain_keywords,
+            geoip_countries,
             action,
         }
     }
@@ -202,6 +207,9 @@ impl ConnectAction {
 /// Threshold for enabling cache based on rule count.
 /// If rule count exceeds this value, caching is enabled even without DNS resolution.
 const CACHE_RULE_THRESHOLD: usize = 16;
+
+static GEOIP_READER: OnceLock<Result<Reader<Vec<u8>>, String>> = OnceLock::new();
+const GEOIP_METADB_Z: &[u8] = include_bytes!("../../../assets/geoip.metadb.z");
 
 // TODO: Replace linear rule matching with radix set/trie
 #[derive(Debug)]
@@ -456,6 +464,27 @@ async fn match_rule(
             }
             continue;
         }
+        if !rule.geoip_countries.is_empty() {
+            match matches_geoip_countries(&rule.geoip_countries, location, resolver).await {
+                Ok(is_match) => {
+                    if is_match {
+                        debug!(
+                            "Found matching GeoIP country for {} -> {:?}",
+                            location.location(),
+                            rule.geoip_countries
+                        );
+                        return Ok(Some(rule_index));
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Non-fatal error while trying to match GeoIP rule for {}: {e}",
+                        location.location()
+                    );
+                }
+            }
+            continue;
+        }
         for mask in rule.masks.iter() {
             match match_mask(
                 mask,
@@ -503,6 +532,64 @@ fn matches_domain_keywords(keywords: &[String], hostname: Option<&str>) -> bool 
         let keyword = keyword.trim();
         !keyword.is_empty() && hostname.contains(&keyword.to_ascii_lowercase())
     })
+}
+
+#[inline]
+async fn matches_geoip_countries(
+    countries: &[String],
+    location: &mut ResolvedLocation,
+    resolver: &Arc<dyn Resolver>,
+) -> std::io::Result<bool> {
+    let ip = match location.location().address() {
+        Address::Ipv4(addr) => IpAddr::V4(*addr),
+        Address::Ipv6(addr) => IpAddr::V6(*addr),
+        Address::Hostname(_) => resolve_location(location, resolver).await?.ip(),
+    };
+    let Some(country_code) = geoip_country_code(ip)? else {
+        return Ok(false);
+    };
+    Ok(countries
+        .iter()
+        .any(|country| country.eq_ignore_ascii_case(&country_code)))
+}
+
+#[inline]
+fn geoip_country_code(ip: IpAddr) -> std::io::Result<Option<String>> {
+    let reader = GEOIP_READER.get_or_init(|| {
+        let geoip_data = miniz_oxide::inflate::decompress_to_vec_zlib(GEOIP_METADB_Z)
+            .map_err(|e| format!("failed to decompress embedded geoip.metadb: {e:?}"))?;
+        Reader::from_source(geoip_data)
+            .map_err(|e| format!("failed to load embedded geoip.metadb: {e}"))
+    });
+    let reader = reader
+        .as_ref()
+        .map_err(|e| std::io::Error::other(e.clone()))?;
+    let result = reader
+        .lookup(ip)
+        .map_err(|e| std::io::Error::other(format!("GeoIP lookup failed: {e}")))?;
+    let country_code: Option<String> =
+        if let Ok(country_code) = result.decode_path(&maxminddb::path!["country", "iso_code"]) {
+            let code: Option<&str> = country_code;
+            code.map(|code| code.to_ascii_uppercase())
+        } else if let Ok(country_code) = result.decode::<String>() {
+            country_code
+                .map(|code| code.to_ascii_uppercase())
+                .filter(|code| is_country_code(code))
+        } else if let Ok(tags) = result.decode::<Vec<String>>() {
+            tags.and_then(|tags| {
+                tags.into_iter()
+                    .map(|tag| tag.to_ascii_uppercase())
+                    .find(|tag| is_country_code(tag))
+            })
+        } else {
+            None
+        };
+    Ok(country_code)
+}
+
+#[inline]
+fn is_country_code(code: &str) -> bool {
+    code.len() == 2 && code.chars().all(|ch| ch.is_ascii_alphabetic())
 }
 
 enum MatchMaskError {
@@ -697,6 +784,7 @@ mod tests {
         ConnectRule::with_domain_keywords(
             vec![NetLocationMask::ANY],
             keywords.into_iter().map(|item| item.to_string()).collect(),
+            Vec::new(),
             ConnectAction::new_block(),
         )
     }
@@ -2137,6 +2225,18 @@ mod tests {
         assert_ne!(
             mask.address_mask.netmask, 0,
             "172.17.0.0/24 should have netmask != 0"
+        );
+    }
+
+    #[test]
+    fn test_embedded_geoip_country_lookup() {
+        assert_eq!(
+            geoip_country_code(IpAddr::V4(Ipv4Addr::new(114, 114, 114, 114))).unwrap(),
+            Some("CN".to_string())
+        );
+        assert_eq!(
+            geoip_country_code(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).unwrap(),
+            Some("US".to_string())
         );
     }
 }

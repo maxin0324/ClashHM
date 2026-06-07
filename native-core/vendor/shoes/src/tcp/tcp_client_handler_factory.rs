@@ -404,6 +404,7 @@ pub fn create_tcp_client_proxy_selector(
             let RuleConfig {
                 masks,
                 domain_keywords,
+                geoip_countries,
                 action,
             } = rule_config;
             let connect_action = match action {
@@ -416,7 +417,12 @@ pub fn create_tcp_client_proxy_selector(
                 }
                 RuleActionConfig::Block => ConnectAction::new_block(),
             };
-            ConnectRule::with_domain_keywords(masks.into_vec(), domain_keywords, connect_action)
+            ConnectRule::with_domain_keywords(
+                masks.into_vec(),
+                domain_keywords,
+                geoip_countries,
+                connect_action,
+            )
         })
         .collect::<Vec<_>>();
     ClientProxySelector::new(rules)

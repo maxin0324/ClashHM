@@ -12,6 +12,7 @@ use super::selection::ConfigSelection;
 pub struct RuleConfig {
     pub masks: OneOrSome<NetLocationMask>,
     pub domain_keywords: Vec<String>,
+    pub geoip_countries: Vec<String>,
     pub action: RuleActionConfig,
 }
 
@@ -20,6 +21,7 @@ impl Default for RuleConfig {
         Self {
             masks: OneOrSome::One(NetLocationMask::ANY),
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: None,
                 client_chains: NoneOrSome::One(ClientChain::default()),
@@ -189,6 +191,8 @@ impl<'de> Deserialize<'de> for RuleConfig {
             masks: Option<OneOrSome<NetLocationMask>>,
             #[serde(default)]
             domain_keywords: NoneOrSome<String>,
+            #[serde(default)]
+            geoip_countries: NoneOrSome<String>,
             // Action fields (from RuleActionConfig)
             #[serde(default)]
             action: Option<String>,
@@ -277,6 +281,7 @@ impl<'de> Deserialize<'de> for RuleConfig {
         Ok(RuleConfig {
             masks,
             domain_keywords: temp.domain_keywords.into_vec(),
+            geoip_countries: temp.geoip_countries.into_vec(),
             action,
         })
     }
@@ -289,7 +294,7 @@ impl Serialize for RuleConfig {
     {
         use serde::ser::SerializeMap;
 
-        // Count fields: masks + optional domain_keywords + action fields
+        // Count fields: masks + optional matchers + action fields
         let action_field_count = match &self.action {
             RuleActionConfig::Block => 1, // action
             RuleActionConfig::Allow {
@@ -312,12 +317,22 @@ impl Serialize for RuleConfig {
         } else {
             1
         };
-        let mut map = serializer.serialize_map(Some(1 + domain_keyword_count + action_field_count))?;
+        let geoip_country_count = if self.geoip_countries.is_empty() {
+            0
+        } else {
+            1
+        };
+        let mut map = serializer.serialize_map(Some(
+            1 + domain_keyword_count + geoip_country_count + action_field_count,
+        ))?;
 
         // Serialize masks
         map.serialize_entry("masks", &self.masks)?;
         if !self.domain_keywords.is_empty() {
             map.serialize_entry("domain_keywords", &self.domain_keywords)?;
+        }
+        if !self.geoip_countries.is_empty() {
+            map.serialize_entry("geoip_countries", &self.geoip_countries)?;
         }
 
         // Serialize action fields (flattened)
@@ -626,6 +641,7 @@ mod tests {
                 NetLocationMask::from("10.0.0.0/8:443").unwrap(),
             ]),
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: Some(NetLocation::from_ip_addr(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),

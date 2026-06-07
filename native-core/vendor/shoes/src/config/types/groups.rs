@@ -287,6 +287,7 @@ mod tests {
                 NetLocationMask::from("10.0.0.0/8:443").unwrap(),
             ]),
             domain_keywords: Vec::new(),
+            geoip_countries: Vec::new(),
             action: RuleActionConfig::Allow {
                 override_address: Some(NetLocation::from_ip_addr(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -381,6 +382,7 @@ client_proxies:
                 RuleConfig {
                     masks: OneOrSome::One(NetLocationMask::ANY),
                     domain_keywords: Vec::new(),
+                    geoip_countries: Vec::new(),
                     action: RuleActionConfig::Block,
                 },
             ]),

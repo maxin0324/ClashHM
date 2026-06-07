@@ -57,14 +57,16 @@ Supported rule handling currently covers common Clash rules such as:
 - `IP-CIDR6`
 - `DST-PORT`
 - Expanded local `RULE-SET` entries for common provider formats
-- Basic built-in `GEOIP,PRIVATE/LAN`, `GEOSITE,cn/geolocation-cn`, and `GEOSITE,private/local/lan` rules
+- Built-in `GEOIP,PRIVATE/LAN`
+- MMDB-backed `GEOIP,<country-code>` country rules, including `GEOIP,CN`
+- Basic `GEOSITE,cn/geolocation-cn` and `GEOSITE,private/local/lan` rules
 - `url-test` / `fallback` group selection based on native-core latency results
 
 Still unsupported or incomplete:
 
 - Hysteria2
 - TUIC
-- Full MMDB/dat backed `GEOIP` / `GEOSITE` routing
+- Full dat backed `GEOSITE` routing
 - simple-obfs / obfs Shadowsocks plugins
 - Full Clash-compatible URL-test behavior
 
@@ -72,7 +74,7 @@ Still unsupported or incomplete:
 
 The highest-value work is routing and compatibility before adding more protocol families:
 
-1. Improve rule matching with local MMDB/dat backed `GEOIP` and `GEOSITE`.
+1. Improve rule matching with full dat backed `GEOSITE` and broader rule-provider compatibility.
 2. Expand provider and subscription compatibility using mihomo/sing-box behavior as references.
 3. Add real-device coverage for HTTP/2 and gRPC transport variants.
 4. Implement Hysteria2 and TUIC only after the embedded backend has a complete QUIC client path.

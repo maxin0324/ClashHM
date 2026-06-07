@@ -1887,6 +1887,19 @@ fn geoip_cidrs(payload: &str) -> Option<Vec<&'static str>> {
     }
 }
 
+fn geoip_country(payload: &str) -> Option<String> {
+    let country = payload
+        .trim()
+        .trim_start_matches("geoip:")
+        .trim()
+        .to_ascii_uppercase();
+    if country.len() == 2 && country.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        Some(country)
+    } else {
+        None
+    }
+}
+
 fn modeled_rule_masks(rule: &ClashRule) -> Option<Vec<String>> {
     if let Some(mask) = rule_mask(rule) {
         return Some(vec![mask]);
@@ -1898,6 +1911,13 @@ fn modeled_rule_masks(rule: &ClashRule) -> Option<Vec<String>> {
     if rule.rule_type == "GEOIP" {
         return geoip_cidrs(&rule.payload)
             .map(|cidrs| cidrs.into_iter().map(str::to_string).collect());
+    }
+    None
+}
+
+fn modeled_geoip_country(rule: &ClashRule) -> Option<String> {
+    if rule.rule_type == "GEOIP" && geoip_cidrs(&rule.payload).is_none() {
+        return geoip_country(&rule.payload);
     }
     None
 }
@@ -1923,7 +1943,10 @@ fn build_domain_keyword_rule_yaml(
 fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
     let mut types = Vec::new();
     for rule in rules {
-        if rule.rule_type == "DOMAIN-KEYWORD" || modeled_rule_masks(rule).is_some() {
+        if rule.rule_type == "DOMAIN-KEYWORD"
+            || modeled_rule_masks(rule).is_some()
+            || modeled_geoip_country(rule).is_some()
+        {
             continue;
         }
         if !types.contains(&rule.rule_type) {
@@ -1936,7 +1959,11 @@ fn skipped_rule_types(rules: &[ClashRule]) -> Vec<String> {
 fn skipped_rule_count(rules: &[ClashRule]) -> usize {
     rules
         .iter()
-        .filter(|rule| rule.rule_type != "DOMAIN-KEYWORD" && modeled_rule_masks(rule).is_none())
+        .filter(|rule| {
+            rule.rule_type != "DOMAIN-KEYWORD"
+                && modeled_rule_masks(rule).is_none()
+                && modeled_geoip_country(rule).is_none()
+        })
         .count()
 }
 
@@ -1970,6 +1997,24 @@ fn build_rule_yaml(
     }
 }
 
+fn build_geoip_country_rule_yaml(
+    country: &str,
+    target: &str,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+) -> Result<String, String> {
+    match build_rule_client_chain(target, groups, proxies)? {
+        Some(chain) => Ok(format!(
+            "    - masks: \"0.0.0.0/0\"\n      geoip_countries: {}\n      action: allow\n      client_chain:\n{chain}",
+            yaml_quote(country)
+        )),
+        None => Ok(format!(
+            "    - masks: \"0.0.0.0/0\"\n      geoip_countries: {}\n      action: block\n",
+            yaml_quote(country)
+        )),
+    }
+}
+
 fn build_default_rule(groups: &[ProxyGroup], proxies: &[ProxyNode]) -> Result<String, String> {
     let target = selected_group(groups)
         .and_then(|group| {
@@ -1994,6 +2039,15 @@ fn build_shoes_rules(
         if rule.rule_type == "DOMAIN-KEYWORD" {
             out.push_str(&build_domain_keyword_rule_yaml(
                 &rule.payload,
+                &rule.target,
+                groups,
+                proxies,
+            )?);
+            continue;
+        }
+        if let Some(country) = modeled_geoip_country(rule) {
+            out.push_str(&build_geoip_country_rule_yaml(
+                &country,
                 &rule.target,
                 groups,
                 proxies,
@@ -2657,7 +2711,7 @@ rules:
     }
 
     #[test]
-    fn skips_unsupported_routing_rules_and_uses_match_fallback() {
+    fn maps_geoip_country_rules_and_uses_match_fallback() {
         let config = r#"
 proxies:
   - { name: A, type: ss, server: proxy.example.com, port: 443, cipher: aes-128-gcm, password: secret }
@@ -2672,7 +2726,7 @@ rules:
 "#;
         let (proxies, groups, rules) = parse_clash_config(config);
         let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
-        assert!(!shoes_config.contains("CN"));
+        assert!(shoes_config.contains("geoip_countries: \"CN\""));
         assert!(shoes_config.contains("masks: \"0.0.0.0/0\""));
         assert!(shoes_config.contains("address: \"proxy.example.com:443\""));
     }
@@ -3324,6 +3378,7 @@ rules:
   - GEOIP,PRIVATE,DIRECT
   - GEOSITE,cn,DIRECT
   - GEOIP,CN,DIRECT
+  - GEOSITE,category-ads-all,DIRECT
   - MATCH,Proxy
 "#,
         )
@@ -3337,8 +3392,8 @@ rules:
         clashhm_native_core_free_string(status_ptr);
         assert!(status.contains("\"skippedRuleCount\":1"), "{status}");
         assert!(!status.contains("DOMAIN-KEYWORD"), "{status}");
-        assert!(!status.contains("GEOSITE"), "{status}");
-        assert!(status.contains("GEOIP"), "{status}");
+        assert!(status.contains("GEOSITE"), "{status}");
+        assert!(!status.contains("GEOIP"), "{status}");
     }
 
     #[test]
@@ -3434,6 +3489,7 @@ rules:
         assert!(shoes_config.contains("domain_keywords: \"google\""));
         assert!(shoes_config.contains("masks: \"10.0.0.0/8\""));
         assert!(shoes_config.contains("masks: \"cn\""));
+        assert!(shoes_config.contains("geoip_countries: \"CN\""));
         assert!(!shoes_config.contains("masks: \"CN\""));
     }
 
