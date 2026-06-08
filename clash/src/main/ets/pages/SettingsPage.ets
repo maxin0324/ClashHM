@@ -32,7 +32,7 @@ export struct SettingsPage {
             .fontSize(24)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
-          Text('Core, network, and app preferences')
+          Text($r('app.string.settings_subtitle'))
             .fontSize(13)
             .fontColor($r('app.color.text_secondary'))
         }
@@ -65,7 +65,7 @@ export struct SettingsPage {
         }
 
         ListItem() {
-          this.selectorItem('TLS Client', this.settings.tlsClientMode, ['chrome', 'rustls'], (val: string) => {
+          this.selectorItem($r('app.string.tls_client'), this.settings.tlsClientMode, ['chrome', 'rustls'], (val: string) => {
             this.updateSetting('tlsClientMode', val);
           })
         }
@@ -121,11 +121,11 @@ export struct SettingsPage {
         }
 
         ListItem() {
-          this.valueItem('Core', 'Extension native-core')
+          this.valueItem($r('app.string.core'), $r('app.string.extension_native_core'))
         }
 
         ListItem() {
-          this.valueItem('Platform', 'HarmonyOS NEXT')
+          this.valueItem($r('app.string.platform'), 'HarmonyOS NEXT')
         }
       }
       .width('100%')
@@ -198,7 +198,7 @@ export struct SettingsPage {
   }
 
   @Builder
-  valueItem(title: ResourceStr, value: string) {
+  valueItem(title: ResourceStr, value: ResourceStr) {
     Row() {
       Text(title)
         .fontSize(15)

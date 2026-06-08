@@ -2802,7 +2802,10 @@ fn effective_rules(
 
 #[cfg(feature = "shoes-backend")]
 fn stop_shoes_backend() {
-    let handle = shoes_handle().lock().unwrap().take();
+    let handle = shoes_handle()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
     if let Some(mut handle) = handle {
         if let Some(tx) = handle.shutdown_tx.take() {
             let _ = tx.send(());
@@ -3037,7 +3040,7 @@ fn start_shoes_backend(shoes_yaml: String, dns_config: ClashDnsConfig) -> Result
         .await;
         running_for_task.store(false, Ordering::SeqCst);
     });
-    *shoes_handle().lock().unwrap() = Some(ShoesHandle {
+    *shoes_handle().lock().unwrap_or_else(|e| e.into_inner()) = Some(ShoesHandle {
         runtime,
         shutdown_tx: Some(shutdown_tx),
         running,
@@ -3050,7 +3053,11 @@ fn stop_shoes_backend() {}
 
 #[cfg(feature = "shoes-backend")]
 fn running_snapshot(state_running: bool) -> bool {
-    if let Some(handle) = shoes_handle().lock().unwrap().as_ref() {
+    if let Some(handle) = shoes_handle()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         return handle.running.load(Ordering::SeqCst);
     }
     state_running
@@ -3275,7 +3282,7 @@ pub extern "C" fn clashhm_native_core_init(home_dir: *const c_char) -> c_int {
     let Ok(home) = cstr_to_string(home_dir) else {
         return -1;
     };
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.home_dir = home;
     guard.status = "initialized".to_string();
     guard.engine = "native-core".to_string();
@@ -3313,7 +3320,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
     } else {
         build_shoes_tun_config_with_runtime(tun_fd, &groups, &proxies, &effective, &runtime_config)
     };
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.tun_fd = tun_fd;
     guard.proxies = proxies;
     guard.groups = groups;
@@ -3370,7 +3377,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_stop() -> c_int {
     stop_shoes_backend();
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.running = false;
     guard.tun_fd = -1;
     guard.status = "stopped".to_string();
@@ -3382,13 +3389,17 @@ pub extern "C" fn clashhm_native_core_stop() -> c_int {
 pub extern "C" fn clashhm_native_core_is_running() -> c_int {
     #[cfg(feature = "shoes-backend")]
     {
-        if let Some(handle) = shoes_handle().lock().unwrap().as_ref() {
+        if let Some(handle) = shoes_handle()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             if handle.running.load(Ordering::SeqCst) {
                 return 1;
             }
         }
     }
-    let guard = state().lock().unwrap();
+    let guard = state().lock().unwrap_or_else(|e| e.into_inner());
     if guard.running {
         1
     } else {
@@ -3405,7 +3416,7 @@ pub extern "C" fn clashhm_native_core_load_config(clash_config: *const c_char) -
     if proxies.is_empty() || groups.is_empty() {
         return -2;
     }
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.proxies = proxies;
     guard.groups = groups;
     guard.rules = rules;
@@ -3418,7 +3429,7 @@ pub extern "C" fn clashhm_native_core_load_config(clash_config: *const c_char) -
 
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_get_proxies_json() -> *mut c_char {
-    let guard = state().lock().unwrap();
+    let guard = state().lock().unwrap_or_else(|e| e.into_inner());
     into_c_string(proxies_json(
         &guard.groups,
         &guard.proxies,
@@ -3449,7 +3460,7 @@ pub extern "C" fn clashhm_native_core_select_proxy(
     let Ok(proxy_name) = cstr_to_string(proxy_name) else {
         return -1;
     };
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     let Some(group_index) = guard
         .groups
         .iter()
@@ -3493,7 +3504,7 @@ pub extern "C" fn clashhm_native_core_set_mode(mode: *const c_char) -> c_int {
     let Ok(mode) = cstr_to_string(mode) else {
         return -1;
     };
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.connection_mode = parse_connection_mode_text(&mode);
     let should_restart = guard.running && guard.tun_fd > 0;
     if should_restart {
@@ -3527,7 +3538,7 @@ pub extern "C" fn clashhm_native_core_test_delay(
         return -1;
     };
     let url = cstr_to_string(url).unwrap_or_default();
-    let guard = state().lock().unwrap();
+    let guard = state().lock().unwrap_or_else(|e| e.into_inner());
     let proxy = if proxy_name.is_empty() {
         selected_proxy(&guard.groups, &guard.proxies)
     } else {
@@ -3540,7 +3551,7 @@ pub extern "C" fn clashhm_native_core_test_delay(
     let tested_proxy = proxy.clone();
     drop(guard);
     let result = proxy_delay_ms(&tested_proxy, &url, timeout_ms).unwrap_or_else(|code| code);
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     guard.last_delay_ms = result;
     guard.delay_by_proxy.insert(tested_proxy_name, result);
     let delay_by_proxy = guard.delay_by_proxy.clone();
@@ -3555,7 +3566,7 @@ pub extern "C" fn clashhm_native_core_get_traffic_json() -> *mut c_char {
     #[cfg(not(feature = "shoes-backend"))]
     let (upload_total, download_total) = (0u64, 0u64);
     let now = now_ms();
-    let mut guard = state().lock().unwrap();
+    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     let elapsed_ms = now.saturating_sub(guard.last_traffic_at_ms);
     let upload_delta = upload_total.saturating_sub(guard.last_upload_total);
     let download_delta = download_total.saturating_sub(guard.last_download_total);
@@ -3581,7 +3592,7 @@ pub extern "C" fn clashhm_native_core_get_traffic_json() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
-    let guard = state().lock().unwrap();
+    let guard = state().lock().unwrap_or_else(|e| e.into_inner());
     let running = running_snapshot(guard.running);
     let selected_group = selected_group(&guard.groups);
     let selected_group_name = selected_group

@@ -12,7 +12,7 @@ export struct SubscriptionPage {
   @State dialogName: string = '';
   @State dialogUrl: string = '';
   @State editingId: string = '';
-  @State errorMsg: string = '';
+  @State errorMsg: ResourceStr = '';
   private subService: SubscriptionService | null = null;
 
   aboutToAppear(): void {
@@ -55,7 +55,7 @@ export struct SubscriptionPage {
 
   private async confirmAdd(): Promise<void> {
     if (!this.dialogName.trim() || !this.dialogUrl.trim()) {
-      this.errorMsg = 'Please fill in all fields';
+      this.errorMsg = $r('app.string.fill_all_fields');
       return;
     }
 
@@ -133,7 +133,7 @@ export struct SubscriptionPage {
               .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
-            Text(`${this.subscriptions.length} profiles`)
+            Text($r('app.string.profiles_count', this.subscriptions.length))
               .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
           }
@@ -148,7 +148,7 @@ export struct SubscriptionPage {
           }
 
           Button() {
-            Text('Add')
+            Text($r('app.string.add'))
               .fontSize(13)
               .fontWeight(FontWeight.Medium)
               .fontColor(Color.White)
@@ -171,7 +171,7 @@ export struct SubscriptionPage {
               .fontSize(18)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
-            Text('Add a profile to start syncing nodes.')
+            Text($r('app.string.add_profile_hint'))
               .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
               .textAlign(TextAlign.Center)
@@ -246,7 +246,7 @@ export struct SubscriptionPage {
                 .fontSize(14)
                 .fontColor($r('app.color.text_secondary'))
                 .alignSelf(ItemAlign.Start)
-              TextInput({ placeholder: 'My Subscription', text: this.dialogName })
+              TextInput({ placeholder: $r('app.string.my_subscription'), text: this.dialogName })
                 .height(44)
                 .borderRadius(8)
                 .backgroundColor($r('app.color.page_bg'))

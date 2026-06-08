@@ -12,6 +12,7 @@ It is not a wrapper around a desktop Clash binary. The VPN traffic path is desig
 - System VPN integration through `VpnExtensionAbility`
 - Embedded Rust/C++ native core in the VPN Extension
 - Clash subscription import and update
+- Share-link subscription import for common `ss://`, `vmess://`, `vless://`, `trojan://`, `hysteria2://`, and `hy2://` node links, normalized into Clash YAML
 - Proxy groups, node selection, and saved selections
 - Rule / Global / Direct modes
 - Traffic counters and connection status
@@ -112,7 +113,7 @@ More details are available in [docs/extension-native-core.md](docs/extension-nat
 
 ## Screens and Workflow
 
-1. Add a Clash subscription from the Subscribe page.
+1. Add a Clash YAML subscription or common share-link subscription from the Subscribe page.
 2. Open the Proxy page and select a node before connecting.
 3. Tap the connect button on the Home page.
 4. Allow the HarmonyOS VPN permission prompt.

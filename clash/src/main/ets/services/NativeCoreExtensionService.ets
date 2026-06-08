@@ -63,6 +63,14 @@ export class NativeCoreExtensionService {
     return this.sendCommand('getConnections', '', '', Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 3000);
   }
 
+  async closeConnection(id: string): Promise<NativeCoreCommandResult> {
+    return this.sendCommand('closeConnection', '', id, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 3000);
+  }
+
+  async closeAllConnections(): Promise<NativeCoreCommandResult> {
+    return this.sendCommand('closeAllConnections', '', '', Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 3000);
+  }
+
   async stop(): Promise<NativeCoreCommandResult> {
     return this.sendCommand('stop', '', '', Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 3000);
   }

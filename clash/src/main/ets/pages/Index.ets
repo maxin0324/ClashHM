@@ -18,7 +18,7 @@ struct Index {
   @State showErrorDetail: boolean = false;
   @State copyStatus: string = '';
   private tabsController: TabsController = new TabsController();
-  private tabTitles: string[] = ['Home', 'Proxy', 'Subscribe', 'Settings'];
+  private tabTitles: Resource[] = [$r('app.string.tab_home'), $r('app.string.tab_proxy'), $r('app.string.tab_subscription'), $r('app.string.tab_settings')];
   private tabIcons: string[] = ['⌂', '⇄', '☰', '⋯'];
 
   aboutToAppear(): void {
@@ -56,7 +56,7 @@ struct Index {
   }
 
   @Builder
-  tabBuilder(title: string, icon: string, index: number) {
+  tabBuilder(title: ResourceStr, icon: string, index: number) {
     Column() {
       Text(icon)
         .fontSize(index === 3 ? 25 : 21)
@@ -82,12 +82,12 @@ struct Index {
       if (this.errorDetail) {
         Column({ space: 8 }) {
           Row({ space: 10 }) {
-            Text(this.engineMode === 'mock' ? 'Engine unavailable' : `Engine: ${this.engineMode}`)
+            Text(this.engineMode === 'mock' ? $r('app.string.engine_unavailable') : `Engine: ${this.engineMode}`)
               .fontSize(12)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.error_color'))
               .layoutWeight(1)
-            Button('Copy')
+            Button($r('app.string.copy'))
               .height(28)
               .fontSize(12)
               .fontColor($r('app.color.primary'))
@@ -97,7 +97,7 @@ struct Index {
               .onClick(() => {
                 this.copyDiagnostic();
               })
-            Button(this.showErrorDetail ? 'Hide' : 'Details')
+            Button(this.showErrorDetail ? $r('app.string.hide') : $r('app.string.details'))
               .height(28)
               .fontSize(12)
               .fontColor($r('app.color.text_secondary'))

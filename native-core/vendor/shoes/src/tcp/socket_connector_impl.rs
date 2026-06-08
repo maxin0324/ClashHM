@@ -176,7 +176,8 @@ impl SocketConnectorImpl {
                     match rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256 {
                         rustls::SupportedCipherSuite::Tls13(t) => t,
                         _ => {
-                            panic!("Could not retrieve Tls13CipherSuite");
+                            log::error!("Could not retrieve Tls13CipherSuite from rustls");
+                            return None;
                         }
                     };
 

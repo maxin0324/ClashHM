@@ -178,15 +178,18 @@ where
     }
 
     /// Create a new VisionStream for client-side connections with VLESS response handling
-    pub fn new_client(tcp: IO, session: CryptoConnection, user_uuid: [u8; 16]) -> Self {
+    pub fn new_client(tcp: IO, session: CryptoConnection, user_uuid: [u8; 16]) -> std::io::Result<Self> {
         if !session.is_client() {
-            panic!("VisionStream::new_client requires a client-side connection");
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "VisionStream::new_client requires a client-side connection",
+            ));
         }
 
-        Self::new_common(
+        Ok(Self::new_common(
             tcp, session, user_uuid, true,  // vless_response_pending
             false, // vless_response_to_send
-        )
+        ))
     }
 
     fn new_common(

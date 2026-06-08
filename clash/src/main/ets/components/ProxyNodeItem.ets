@@ -23,12 +23,12 @@ export struct ProxyNodeItem {
     return $r('app.color.latency_bad');
   }
 
-  private getLatencyText(): string {
+  private getLatencyText(): ResourceStr {
     if (this.node.latency < 0) {
       return '--';
     }
     if (this.node.latency === 0) {
-      return 'timeout';
+      return $r('app.string.timeout');
     }
     return `${this.node.latency} ms`;
   }

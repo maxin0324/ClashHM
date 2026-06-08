@@ -30,7 +30,7 @@ export struct SubscriptionCard {
               .layoutWeight(1)
 
             if (this.sub.isActive) {
-              Text('Active')
+              Text($r('app.string.active'))
                 .fontSize(10)
                 .fontColor(Color.White)
                 .backgroundColor($r('app.color.connected_color'))
@@ -51,7 +51,7 @@ export struct SubscriptionCard {
       .width('100%')
 
       Row() {
-        Text(`${this.sub.nodeCount} nodes`)
+        Text($r('app.string.nodes_count', this.sub.nodeCount))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
 
@@ -101,7 +101,7 @@ export struct SubscriptionCard {
       Row({ space: 8 }) {
         Blank()
 
-        Button('Update')
+        Button($r('app.string.update'))
           .type(ButtonType.Normal)
           .height(32)
           .width(64)
@@ -111,7 +111,7 @@ export struct SubscriptionCard {
           .borderRadius(7)
           .onClick(() => this.onUpdate())
 
-        Button('Edit')
+        Button($r('app.string.edit'))
           .type(ButtonType.Normal)
           .height(32)
           .width(52)
@@ -121,7 +121,7 @@ export struct SubscriptionCard {
           .borderRadius(7)
           .onClick(() => this.onEdit())
 
-        Button('Delete')
+        Button($r('app.string.delete'))
           .type(ButtonType.Normal)
           .height(32)
           .width(60)

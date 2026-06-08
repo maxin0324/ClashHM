@@ -130,10 +130,26 @@ export class NapiClashService implements IClashService {
     return [];
   }
 
-  async closeConnection(_id: string): Promise<void> {
+  async closeConnection(id: string): Promise<void> {
+    if (this.state !== ConnectState.CONNECTED) {
+      return;
+    }
+    try {
+      await new NativeCoreExtensionService(this.context).closeConnection(id);
+    } catch (e) {
+      Logger.error('Close connection through Extension failed: %{public}s', String(e));
+    }
   }
 
   async closeAllConnections(): Promise<void> {
+    if (this.state !== ConnectState.CONNECTED) {
+      return;
+    }
+    try {
+      await new NativeCoreExtensionService(this.context).closeAllConnections();
+    } catch (e) {
+      Logger.error('Close all connections through Extension failed: %{public}s', String(e));
+    }
   }
 
   isCoreRunning(): boolean {

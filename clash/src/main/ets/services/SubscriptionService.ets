@@ -13,6 +13,26 @@ class ProviderFetchConfig {
   path: string = '';
 }
 
+class ShareLinkNode {
+  name: string = '';
+  yaml: string = '';
+
+  constructor(name: string, yaml: string) {
+    this.name = name;
+    this.yaml = yaml;
+  }
+}
+
+class HostPort {
+  host: string = '';
+  port: string = '';
+
+  constructor(host: string, port: string) {
+    this.host = host;
+    this.port = port;
+  }
+}
+
 export class SubscriptionService {
   private context: common.UIAbilityContext;
   private store: preferences.Preferences | null = null;
@@ -163,6 +183,7 @@ export class SubscriptionService {
         Logger.info('fetch step 6: file written');
 
         sub.lastUpdate = Date.now();
+        this.parseSubscriptionInfo(sub, response.header as Record<string, string>);
         try {
           if (typeof content === 'string') {
             this.countNodes(sub, content);
@@ -534,7 +555,7 @@ export class SubscriptionService {
         firstLine.startsWith('vmess://') || firstLine.startsWith('vless://') ||
         firstLine.startsWith('trojan://') || firstLine.startsWith('hysteria2://') ||
         firstLine.startsWith('hy2://')) {
-        throw new Error('This subscription returns share-link nodes instead of Clash YAML. Link conversion is not implemented yet.');
+        normalized = this.convertShareLinksToClashYaml(normalized);
       }
     }
 
@@ -590,6 +611,573 @@ export class SubscriptionService {
       }
     }
     return result;
+  }
+
+  private convertShareLinksToClashYaml(content: string): string {
+    const lines = content.split('\n');
+    const nameCount = new Map<string, number>();
+    const nodes: ShareLinkNode[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0 || trimmed.startsWith('#')) {
+        continue;
+      }
+      try {
+        const node = this.parseShareLink(trimmed);
+        if (node !== null) {
+          const baseName = node.name;
+          const count = nameCount.get(baseName) || 0;
+          if (count > 0) {
+            node.name = `${baseName} ${count + 1}`;
+          }
+          nameCount.set(baseName, count + 1);
+          nodes.push(node);
+        }
+      } catch (_e) {
+        Logger.debug('skip unparseable link: %{public}s', trimmed.substring(0, 30));
+      }
+    }
+
+    if (nodes.length === 0) {
+      throw new Error('No valid proxy links found in subscription');
+    }
+
+    let yaml = 'proxies:\n';
+    for (const node of nodes) {
+      yaml += node.yaml;
+    }
+
+    yaml += '\nproxy-groups:\n';
+    yaml += '  - name: PROXY\n';
+    yaml += '    type: select\n';
+    yaml += '    proxies:\n';
+    for (const node of nodes) {
+      yaml += `      - ${this.yamlQuote(node.name)}\n`;
+    }
+
+    yaml += '\nrules:\n';
+    yaml += '  - MATCH,PROXY\n';
+
+    return yaml;
+  }
+
+  private parseShareLink(link: string): ShareLinkNode | null {
+    if (link.startsWith('ss://')) {
+      return this.parseSsLink(link);
+    } else if (link.startsWith('vmess://')) {
+      return this.parseVmessLink(link);
+    } else if (link.startsWith('vless://')) {
+      return this.parseVlessLink(link);
+    } else if (link.startsWith('trojan://')) {
+      return this.parseTrojanLink(link);
+    } else if (link.startsWith('hysteria2://') || link.startsWith('hy2://')) {
+      return this.parseHysteria2Link(link);
+    }
+    return null;
+  }
+
+  private parseSsLink(link: string): ShareLinkNode | null {
+    let body = link.substring(5);
+    let name = '';
+    const hashIdx = body.lastIndexOf('#');
+    if (hashIdx >= 0) {
+      name = this.decodeUriComponent(body.substring(hashIdx + 1));
+      body = body.substring(0, hashIdx);
+    }
+
+    let method = '';
+    let password = '';
+    let server = '';
+    let port = '';
+    const params = new Map<string, string>();
+
+    const atIdx = body.lastIndexOf('@');
+    if (atIdx >= 0) {
+      const userInfo = this.decodeBase64ToString(body.substring(0, atIdx));
+      const colonIdx = userInfo.indexOf(':');
+      if (colonIdx < 0) {
+        return null;
+      }
+      method = userInfo.substring(0, colonIdx);
+      password = userInfo.substring(colonIdx + 1);
+
+      let hostPort = body.substring(atIdx + 1);
+      const qIdx = hostPort.indexOf('?');
+      if (qIdx >= 0) {
+        this.parseQueryString(hostPort.substring(qIdx + 1), params);
+        hostPort = hostPort.substring(0, qIdx);
+      }
+      const hp = this.splitHostPort(hostPort);
+      if (!hp) {
+        return null;
+      }
+      server = hp.host;
+      port = hp.port;
+    } else {
+      let mainPart = body;
+      const qIdx = mainPart.indexOf('?');
+      if (qIdx >= 0) {
+        this.parseQueryString(mainPart.substring(qIdx + 1), params);
+        mainPart = mainPart.substring(0, qIdx);
+      }
+      const decoded = this.decodeBase64ToString(mainPart);
+      const colonIdx = decoded.indexOf(':');
+      const lastAtIdx = decoded.lastIndexOf('@');
+      if (colonIdx < 0 || lastAtIdx < 0) {
+        return null;
+      }
+      method = decoded.substring(0, colonIdx);
+      const rest = decoded.substring(colonIdx + 1);
+      const restAtIdx = rest.lastIndexOf('@');
+      password = rest.substring(0, restAtIdx);
+      const hp = this.splitHostPort(rest.substring(restAtIdx + 1));
+      if (!hp) {
+        return null;
+      }
+      server = hp.host;
+      port = hp.port;
+    }
+
+    if (!server || !port || !method || !password) {
+      return null;
+    }
+    if (!name) {
+      name = `${server}:${port}`;
+    }
+
+    let yaml = `  - name: ${this.yamlQuote(name)}\n`;
+    yaml += `    type: ss\n`;
+    yaml += `    server: ${this.yamlQuote(server)}\n`;
+    yaml += `    port: ${port}\n`;
+    yaml += `    cipher: ${method}\n`;
+    yaml += `    password: ${this.yamlQuote(password)}\n`;
+
+    const plugin = params.get('plugin') || '';
+    if (plugin === 'obfs-local' || plugin === 'simple-obfs') {
+      const pluginOpts = params.get('plugin-opts') || '';
+      yaml += `    plugin: obfs\n`;
+      yaml += `    plugin-opts:\n`;
+      const optsMap = new Map<string, string>();
+      for (const pair of pluginOpts.split(';')) {
+        const eq = pair.indexOf('=');
+        if (eq > 0) {
+          optsMap.set(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+        }
+      }
+      yaml += `      mode: ${optsMap.get('obfs') || 'http'}\n`;
+      if (optsMap.has('obfs-host')) {
+        yaml += `      host: ${this.yamlQuote(optsMap.get('obfs-host') || '')}\n`;
+      }
+    }
+
+    return new ShareLinkNode(name, yaml);
+  }
+
+  private parseVmessLink(link: string): ShareLinkNode | null {
+    const encoded = link.substring(8);
+    const decoded = this.decodeBase64ToString(encoded);
+    if (!decoded) {
+      return null;
+    }
+
+    let config: Record<string, string | number>;
+    try {
+      config = JSON.parse(decoded) as Record<string, string | number>;
+    } catch (_e) {
+      return null;
+    }
+
+    const server = String(config['add'] || '');
+    const port = String(config['port'] || '');
+    const uuid = String(config['id'] || '');
+    const name = String(config['ps'] || `${server}:${port}`);
+
+    if (!server || !port || !uuid) {
+      return null;
+    }
+
+    const alterId = Number(config['aid'] || 0);
+    const cipher = String(config['scy'] || 'auto');
+    const network = String(config['net'] || 'tcp');
+    const tls = String(config['tls'] || '');
+    const sni = String(config['sni'] || config['host'] || '');
+    const host = String(config['host'] || '');
+    const path = String(config['path'] || '');
+    const type_ = String(config['type'] || 'none');
+
+    let yaml = `  - name: ${this.yamlQuote(name)}\n`;
+    yaml += `    type: vmess\n`;
+    yaml += `    server: ${this.yamlQuote(server)}\n`;
+    yaml += `    port: ${port}\n`;
+    yaml += `    uuid: ${uuid}\n`;
+    yaml += `    alterId: ${alterId}\n`;
+    yaml += `    cipher: ${cipher}\n`;
+
+    if (tls === 'tls') {
+      yaml += `    tls: true\n`;
+      if (sni) {
+        yaml += `    servername: ${sni}\n`;
+      }
+    }
+
+    if (network !== 'tcp') {
+      yaml += `    network: ${network}\n`;
+    }
+    if (network === 'ws') {
+      yaml += `    ws-opts:\n`;
+      if (path) {
+        yaml += `      path: ${this.yamlQuote(path)}\n`;
+      }
+      if (host) {
+        yaml += `      headers:\n`;
+        yaml += `        Host: ${this.yamlQuote(host)}\n`;
+      }
+    } else if (network === 'grpc') {
+      if (path) {
+        yaml += `    grpc-opts:\n`;
+        yaml += `      grpc-service-name: ${this.yamlQuote(path)}\n`;
+      }
+    } else if (network === 'h2') {
+      yaml += `    h2-opts:\n`;
+      if (path) {
+        yaml += `      path: ${this.yamlQuote(path)}\n`;
+      }
+      if (host) {
+        yaml += `      host:\n`;
+        yaml += `        - ${this.yamlQuote(host)}\n`;
+      }
+    } else if (network === 'tcp' && type_ === 'http') {
+      yaml += `    network: http\n`;
+      if (path) {
+        yaml += `    http-opts:\n`;
+        yaml += `      path:\n`;
+        yaml += `        - ${this.yamlQuote(path)}\n`;
+      }
+    }
+
+    return new ShareLinkNode(name, yaml);
+  }
+
+  private parseVlessLink(link: string): ShareLinkNode | null {
+    const body = link.substring(8);
+    const params = new Map<string, string>();
+
+    let name = '';
+    let mainPart = body;
+    const hashIdx = mainPart.lastIndexOf('#');
+    if (hashIdx >= 0) {
+      name = this.decodeUriComponent(mainPart.substring(hashIdx + 1));
+      mainPart = mainPart.substring(0, hashIdx);
+    }
+
+    const qIdx = mainPart.indexOf('?');
+    if (qIdx >= 0) {
+      this.parseQueryString(mainPart.substring(qIdx + 1), params);
+      mainPart = mainPart.substring(0, qIdx);
+    }
+
+    const atIdx = mainPart.lastIndexOf('@');
+    if (atIdx < 0) {
+      return null;
+    }
+    const uuid = mainPart.substring(0, atIdx);
+    const hp = this.splitHostPort(mainPart.substring(atIdx + 1));
+    if (!hp || !uuid) {
+      return null;
+    }
+
+    if (!name) {
+      name = `${hp.host}:${hp.port}`;
+    }
+
+    const security = params.get('security') || '';
+    const sni = params.get('sni') || '';
+    const network = params.get('type') || 'tcp';
+    const flow = params.get('flow') || '';
+    const fp = params.get('fp') || '';
+    const pbk = params.get('pbk') || '';
+    const sid = params.get('sid') || '';
+    const path = params.get('path') || '';
+    const host = params.get('host') || '';
+    const serviceName = params.get('serviceName') || '';
+
+    let yaml = `  - name: ${this.yamlQuote(name)}\n`;
+    yaml += `    type: vless\n`;
+    yaml += `    server: ${this.yamlQuote(hp.host)}\n`;
+    yaml += `    port: ${hp.port}\n`;
+    yaml += `    uuid: ${uuid}\n`;
+
+    if (flow) {
+      yaml += `    flow: ${flow}\n`;
+    }
+
+    if (security === 'tls') {
+      yaml += `    tls: true\n`;
+      if (sni) {
+        yaml += `    servername: ${sni}\n`;
+      }
+      if (fp) {
+        yaml += `    client-fingerprint: ${fp}\n`;
+      }
+    } else if (security === 'reality') {
+      yaml += `    tls: true\n`;
+      if (sni) {
+        yaml += `    servername: ${sni}\n`;
+      }
+      yaml += `    reality-opts:\n`;
+      if (pbk) {
+        yaml += `      public-key: ${pbk}\n`;
+      }
+      if (sid) {
+        yaml += `      short-id: ${sid}\n`;
+      }
+      if (fp) {
+        yaml += `    client-fingerprint: ${fp}\n`;
+      }
+    }
+
+    if (network !== 'tcp') {
+      yaml += `    network: ${network}\n`;
+    }
+    if (network === 'ws') {
+      yaml += `    ws-opts:\n`;
+      if (path) {
+        yaml += `      path: ${this.yamlQuote(this.decodeUriComponent(path))}\n`;
+      }
+      if (host) {
+        yaml += `      headers:\n`;
+        yaml += `        Host: ${this.yamlQuote(host)}\n`;
+      }
+    } else if (network === 'grpc') {
+      if (serviceName) {
+        yaml += `    grpc-opts:\n`;
+        yaml += `      grpc-service-name: ${this.yamlQuote(serviceName)}\n`;
+      }
+    } else if (network === 'h2') {
+      yaml += `    h2-opts:\n`;
+      if (path) {
+        yaml += `      path: ${this.yamlQuote(this.decodeUriComponent(path))}\n`;
+      }
+      if (host) {
+        yaml += `      host:\n`;
+        yaml += `        - ${this.yamlQuote(host)}\n`;
+      }
+    }
+
+    return new ShareLinkNode(name, yaml);
+  }
+
+  private parseTrojanLink(link: string): ShareLinkNode | null {
+    const body = link.substring(9);
+    const params = new Map<string, string>();
+
+    let name = '';
+    let mainPart = body;
+    const hashIdx = mainPart.lastIndexOf('#');
+    if (hashIdx >= 0) {
+      name = this.decodeUriComponent(mainPart.substring(hashIdx + 1));
+      mainPart = mainPart.substring(0, hashIdx);
+    }
+
+    const qIdx = mainPart.indexOf('?');
+    if (qIdx >= 0) {
+      this.parseQueryString(mainPart.substring(qIdx + 1), params);
+      mainPart = mainPart.substring(0, qIdx);
+    }
+
+    const atIdx = mainPart.lastIndexOf('@');
+    if (atIdx < 0) {
+      return null;
+    }
+    const password = this.decodeUriComponent(mainPart.substring(0, atIdx));
+    const hp = this.splitHostPort(mainPart.substring(atIdx + 1));
+    if (!hp || !password) {
+      return null;
+    }
+
+    if (!name) {
+      name = `${hp.host}:${hp.port}`;
+    }
+
+    const sni = params.get('sni') || params.get('peer') || '';
+    const network = params.get('type') || 'tcp';
+    const path = params.get('path') || '';
+    const host = params.get('host') || '';
+    const serviceName = params.get('serviceName') || '';
+    const allowInsecure = params.get('allowInsecure') || '0';
+    const fp = params.get('fp') || '';
+
+    let yaml = `  - name: ${this.yamlQuote(name)}\n`;
+    yaml += `    type: trojan\n`;
+    yaml += `    server: ${this.yamlQuote(hp.host)}\n`;
+    yaml += `    port: ${hp.port}\n`;
+    yaml += `    password: ${this.yamlQuote(password)}\n`;
+
+    if (sni) {
+      yaml += `    sni: ${this.yamlQuote(sni)}\n`;
+    }
+    if (allowInsecure === '1') {
+      yaml += `    skip-cert-verify: true\n`;
+    }
+    if (fp) {
+      yaml += `    client-fingerprint: ${fp}\n`;
+    }
+
+    if (network !== 'tcp') {
+      yaml += `    network: ${network}\n`;
+    }
+    if (network === 'ws') {
+      yaml += `    ws-opts:\n`;
+      if (path) {
+        yaml += `      path: ${this.yamlQuote(this.decodeUriComponent(path))}\n`;
+      }
+      if (host) {
+        yaml += `      headers:\n`;
+        yaml += `        Host: ${this.yamlQuote(host)}\n`;
+      }
+    } else if (network === 'grpc') {
+      if (serviceName) {
+        yaml += `    grpc-opts:\n`;
+        yaml += `      grpc-service-name: ${this.yamlQuote(serviceName)}\n`;
+      }
+    }
+
+    return new ShareLinkNode(name, yaml);
+  }
+
+  private parseHysteria2Link(link: string): ShareLinkNode | null {
+    const prefix = link.startsWith('hy2://') ? 'hy2://' : 'hysteria2://';
+    const body = link.substring(prefix.length);
+    const params = new Map<string, string>();
+
+    let name = '';
+    let mainPart = body;
+    const hashIdx = mainPart.lastIndexOf('#');
+    if (hashIdx >= 0) {
+      name = this.decodeUriComponent(mainPart.substring(hashIdx + 1));
+      mainPart = mainPart.substring(0, hashIdx);
+    }
+
+    const qIdx = mainPart.indexOf('?');
+    if (qIdx >= 0) {
+      this.parseQueryString(mainPart.substring(qIdx + 1), params);
+      mainPart = mainPart.substring(0, qIdx);
+    }
+
+    const atIdx = mainPart.lastIndexOf('@');
+    if (atIdx < 0) {
+      return null;
+    }
+    const auth = this.decodeUriComponent(mainPart.substring(0, atIdx));
+    const hp = this.splitHostPort(mainPart.substring(atIdx + 1));
+    if (!hp || !auth) {
+      return null;
+    }
+
+    if (!name) {
+      name = `${hp.host}:${hp.port}`;
+    }
+
+    const sni = params.get('sni') || '';
+    const insecure = params.get('insecure') || '0';
+    const obfs = params.get('obfs') || '';
+    const obfsPassword = params.get('obfs-password') || '';
+
+    let yaml = `  - name: ${this.yamlQuote(name)}\n`;
+    yaml += `    type: hysteria2\n`;
+    yaml += `    server: ${this.yamlQuote(hp.host)}\n`;
+    yaml += `    port: ${hp.port}\n`;
+    yaml += `    password: ${this.yamlQuote(auth)}\n`;
+
+    if (sni) {
+      yaml += `    sni: ${this.yamlQuote(sni)}\n`;
+    }
+    if (insecure === '1') {
+      yaml += `    skip-cert-verify: true\n`;
+    }
+    if (obfs) {
+      yaml += `    obfs: ${obfs}\n`;
+      if (obfsPassword) {
+        yaml += `    obfs-password: ${this.yamlQuote(obfsPassword)}\n`;
+      }
+    }
+
+    return new ShareLinkNode(name, yaml);
+  }
+
+  private parseQueryString(query: string, out: Map<string, string>): void {
+    for (const pair of query.split('&')) {
+      const eq = pair.indexOf('=');
+      if (eq > 0) {
+        out.set(
+          this.decodeUriComponent(pair.substring(0, eq)),
+          this.decodeUriComponent(pair.substring(eq + 1))
+        );
+      } else if (pair.length > 0) {
+        out.set(this.decodeUriComponent(pair), '');
+      }
+    }
+  }
+
+  private splitHostPort(hostPort: string): HostPort | null {
+    const trimmed = hostPort.trim();
+    if (trimmed.startsWith('[')) {
+      const bracketEnd = trimmed.indexOf(']');
+      if (bracketEnd < 0) {
+        return null;
+      }
+      const host = trimmed.substring(1, bracketEnd);
+      const rest = trimmed.substring(bracketEnd + 1);
+      if (rest.startsWith(':') && rest.length > 1) {
+        return new HostPort(host, rest.substring(1));
+      }
+      return null;
+    }
+    const lastColon = trimmed.lastIndexOf(':');
+    if (lastColon <= 0) {
+      return null;
+    }
+    return new HostPort(trimmed.substring(0, lastColon), trimmed.substring(lastColon + 1));
+  }
+
+  private yamlQuote(value: string): string {
+    if (value.length === 0) {
+      return '""';
+    }
+    if (/^[a-zA-Z0-9._\/-]+$/.test(value)) {
+      return value;
+    }
+    return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+
+  private decodeUriComponent(str: string): string {
+    try {
+      return decodeURIComponent(str.replace(/\+/g, '%20'));
+    } catch (_e) {
+      // Fall through for malformed share links.
+    }
+    const bytes: number[] = [];
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charAt(i);
+      if (ch === '%' && i + 2 < str.length) {
+        const hex = str.substring(i + 1, i + 3);
+        const code = parseInt(hex, 16);
+        if (!isNaN(code)) {
+          bytes.push(code);
+          i += 2;
+          continue;
+        }
+      } else if (ch === '+') {
+        bytes.push(0x20);
+        continue;
+      }
+      const code = str.charCodeAt(i);
+      if (code < 0x80) {
+        bytes.push(code);
+      }
+    }
+    return this.decodeUtf8(bytes);
   }
 
   private generateId(): string {

@@ -43,9 +43,9 @@ export struct HomePage {
   @State connectState: string = ConnectState.DISCONNECTED;
   @State traffic: TrafficData = createEmptyTraffic();
   @State currentMode: string = ConnectionMode.RULE;
-  @State profileName: string = 'No Profile';
+  @State profileName: ResourceStr = $r('app.string.no_profile');
   @State selectedProxyGroup: string = 'Proxy';
-  @State selectedProxyName: string = 'Not selected';
+  @State selectedProxyName: ResourceStr = $r('app.string.not_selected');
   @State errorMsg: string = '';
   @State showErrorDetail: boolean = false;
   @State copyStatus: string = '';
@@ -256,9 +256,9 @@ export struct HomePage {
       await subService.init();
       const activeSub = subService.getActiveSubscription();
       if (!activeSub || !activeSub.filePath) {
-        this.profileName = 'No Profile';
+        this.profileName = $r('app.string.no_profile');
         this.selectedProxyGroup = 'Proxy';
-        this.selectedProxyName = 'Not selected';
+        this.selectedProxyName = $r('app.string.not_selected');
         return;
       }
 
@@ -269,7 +269,7 @@ export struct HomePage {
         const extensionGroup = this.pickPrimaryProxyGroup(extensionGroups);
         if (extensionGroup) {
           this.selectedProxyGroup = extensionGroup.name;
-          this.selectedProxyName = extensionGroup.now || (extensionGroup.all.length > 0 ? extensionGroup.all[0] : 'Not selected');
+          this.selectedProxyName = extensionGroup.now || (extensionGroup.all.length > 0 ? extensionGroup.all[0] : $r('app.string.not_selected'));
           return;
         }
       }
@@ -308,7 +308,7 @@ export struct HomePage {
       }
 
       this.selectedProxyGroup = selectedGroup || 'Proxy';
-      this.selectedProxyName = selectedProxy || 'Not selected';
+      this.selectedProxyName = selectedProxy || $r('app.string.not_selected');
     } catch (e) {
       Logger.error('Failed to refresh profile summary: %{public}s', String(e));
     }
@@ -621,7 +621,7 @@ export struct HomePage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Button('Logs')
+        Button($r('app.string.logs'))
           .height(34)
           .fontSize(13)
           .fontColor($r('app.color.primary'))
@@ -661,7 +661,7 @@ export struct HomePage {
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
 
-          Text('Proxy')
+          Text($r('app.string.proxy'))
             .fontSize(12)
             .fontColor($r('app.color.primary'))
             .height(30)
@@ -677,13 +677,13 @@ export struct HomePage {
         if (this.errorMsg) {
           Column({ space: 8 }) {
             Row({ space: 8 }) {
-              Text('Connection error')
+              Text($r('app.string.connection_error'))
                 .fontSize(12)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.error_color'))
                 .layoutWeight(1)
 
-              Button('Copy')
+              Button($r('app.string.copy'))
                 .height(28)
                 .fontSize(12)
                 .fontColor($r('app.color.primary'))
@@ -694,7 +694,7 @@ export struct HomePage {
                   this.copyError();
                 })
 
-              Button(this.showErrorDetail ? 'Hide' : 'Details')
+              Button(this.showErrorDetail ? $r('app.string.hide') : $r('app.string.details'))
                 .height(28)
                 .fontSize(12)
                 .fontColor($r('app.color.text_secondary'))
@@ -746,9 +746,9 @@ export struct HomePage {
         Row({ space: 8 }) {
           ForEach(
             [
-              new ModeItem(ConnectionMode.RULE, 'Rule'),
-              new ModeItem(ConnectionMode.GLOBAL, 'Global'),
-              new ModeItem(ConnectionMode.DIRECT, 'Direct'),
+              new ModeItem(ConnectionMode.RULE, $r('app.string.rule_mode')),
+              new ModeItem(ConnectionMode.GLOBAL, $r('app.string.global_mode')),
+              new ModeItem(ConnectionMode.DIRECT, $r('app.string.direct_mode')),
             ] as ModeItem[],
             (item: ModeItem) => {
               Text(item.label)
@@ -801,9 +801,9 @@ export struct HomePage {
 
 class ModeItem {
   mode: string;
-  label: string;
+  label: ResourceStr;
 
-  constructor(mode: string, label: string) {
+  constructor(mode: string, label: ResourceStr) {
     this.mode = mode;
     this.label = label;
   }

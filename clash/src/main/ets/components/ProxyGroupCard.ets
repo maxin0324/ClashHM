@@ -28,7 +28,7 @@ export struct ProxyGroupCard {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Text(this.isTesting ? '...' : 'ms')
+        Text(this.isTesting ? '...' : $r('app.string.ms_unit'))
           .fontSize(12)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.canTestLatency ? $r('app.color.primary') : $r('app.color.text_secondary'))

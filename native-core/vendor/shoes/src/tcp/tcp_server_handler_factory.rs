@@ -153,7 +153,7 @@ pub fn create_tcp_server_handler(
             &shadowsocks,
             client_proxy_selector.clone(),
             resolver.clone(),
-        )),
+        ).expect("invalid trojan shadowsocks config")),
         ServerProxyConfig::Tls {
             tls_targets,
             default_tls_target,
@@ -220,7 +220,7 @@ pub fn create_tcp_server_handler(
             udp_enabled,
             client_proxy_selector.clone(),
             resolver.clone(),
-        )),
+        ).expect("invalid vmess cipher config")),
         ServerProxyConfig::Websocket { targets } => {
             let server_targets: Vec<WebsocketServerTarget> = targets
                 .into_vec()

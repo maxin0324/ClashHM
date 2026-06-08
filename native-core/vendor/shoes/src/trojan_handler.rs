@@ -46,7 +46,7 @@ impl TrojanTcpHandler {
         shadowsocks_config: &Option<ShadowsocksConfig>,
         proxy_selector: Arc<ClientProxySelector>,
         resolver: Arc<dyn Resolver>,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         Self::new_inner(
             password,
             shadowsocks_config,
@@ -56,7 +56,7 @@ impl TrojanTcpHandler {
     }
 
     /// Create a new handler for client use (no proxy_selector needed)
-    pub fn new_client(password: &str, shadowsocks_config: &Option<ShadowsocksConfig>) -> Self {
+    pub fn new_client(password: &str, shadowsocks_config: &Option<ShadowsocksConfig>) -> std::io::Result<Self> {
         Self::new_inner(password, shadowsocks_config, None, None)
     }
 
@@ -65,33 +65,39 @@ impl TrojanTcpHandler {
         shadowsocks_config: &Option<ShadowsocksConfig>,
         proxy_selector: Option<Arc<ClientProxySelector>>,
         resolver: Option<Arc<dyn Resolver>>,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         let password_hash = create_password_hash(password);
-        let shadowsocks_data = shadowsocks_config.as_ref().map(|config| match config {
-            ShadowsocksConfig::Legacy {
-                cipher,
-                password: shadowsocks_password,
-            } => {
-                let key: Arc<Box<dyn ShadowsocksKey>> = Arc::new(Box::new(DefaultKey::new(
-                    shadowsocks_password,
-                    cipher.algorithm().key_len(),
-                )));
-                ShadowsocksData {
-                    cipher: *cipher,
-                    key,
+        let shadowsocks_data = match shadowsocks_config.as_ref() {
+            Some(config) => match config {
+                ShadowsocksConfig::Legacy {
+                    cipher,
+                    password: shadowsocks_password,
+                } => {
+                    let key: Arc<Box<dyn ShadowsocksKey>> = Arc::new(Box::new(DefaultKey::new(
+                        shadowsocks_password,
+                        cipher.algorithm().key_len(),
+                    )));
+                    Some(ShadowsocksData {
+                        cipher: *cipher,
+                        key,
+                    })
                 }
-            }
-            ShadowsocksConfig::Aead2022 { .. } => {
-                panic!("Trojan does not support shadowsocks 2022 ciphers (checked during config validation)")
-            }
-        });
+                ShadowsocksConfig::Aead2022 { .. } => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Trojan does not support shadowsocks 2022 ciphers",
+                    ));
+                }
+            },
+            None => None,
+        };
 
-        Self {
+        Ok(Self {
             password_hash,
             shadowsocks_data,
             proxy_selector,
             resolver,
-        }
+        })
     }
 }
 

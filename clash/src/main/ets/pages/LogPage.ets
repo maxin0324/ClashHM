@@ -152,7 +152,7 @@ struct LogPage {
 
   private async clearConnections(): Promise<void> {
     if (this.service) {
-      if (this.service.getState() !== ConnectState.CONNECTED) {
+      if (this.service.getState() === ConnectState.CONNECTED) {
         await this.service.closeAllConnections();
       }
       this.logs = [];
@@ -163,7 +163,7 @@ struct LogPage {
     Column() {
       // Header
       Row() {
-        Button('Back')
+        Button($r('app.string.back'))
           .height(34)
           .fontSize(13)
           .fontColor($r('app.color.text_primary'))
@@ -180,7 +180,7 @@ struct LogPage {
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
-          Text(`${this.logs.length} connections`)
+          Text($r('app.string.connections_count', this.logs.length))
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
         }
@@ -193,7 +193,7 @@ struct LogPage {
             .width(8)
             .height(8)
             .fill(this.isLive ? $r('app.color.connected_color') : $r('app.color.text_secondary'))
-          Text('Live')
+          Text($r('app.string.live'))
             .fontSize(12)
             .fontColor(this.isLive ? $r('app.color.connected_color') : $r('app.color.text_secondary'))
         }
@@ -202,7 +202,7 @@ struct LogPage {
         })
         .margin({ right: 10 })
 
-        Button('Clear')
+        Button($r('app.string.clear'))
           .type(ButtonType.Normal)
           .height(34)
           .fontSize(12)
@@ -219,11 +219,11 @@ struct LogPage {
       .padding({ left: 16, right: 16, top: 18, bottom: 12 })
 
       Row() {
-        Text('Search')
+        Text($r('app.string.search'))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
 
-        TextInput({ placeholder: 'Filter by host, rule, proxy...', text: this.filterText })
+        TextInput({ placeholder: $r('app.string.filter_placeholder'), text: this.filterText })
           .layoutWeight(1)
           .height(36)
           .backgroundColor(Color.Transparent)
@@ -244,7 +244,7 @@ struct LogPage {
 
       if (this.diagnosticText) {
         Column({ space: 6 }) {
-          Text('Diagnostics')
+          Text($r('app.string.diagnostics'))
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary'))

@@ -605,7 +605,9 @@ impl NetLocationMask {
             let colon_count = s.chars().filter(|&c| c == ':').count();
             if colon_count == 1 {
                 // Single colon - treat as port separator
-                let colon_pos = s.find(':').unwrap();
+                let colon_pos = s.find(':').ok_or_else(|| {
+                    std::io::Error::other("Expected ':' port separator not found")
+                })?;
                 let port = s[colon_pos + 1..]
                     .parse::<u16>()
                     .map_err(|e| std::io::Error::other(format!("Failed to parse port: {e}")))?;

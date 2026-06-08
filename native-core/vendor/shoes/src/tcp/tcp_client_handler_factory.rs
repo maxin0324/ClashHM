@@ -118,7 +118,7 @@ pub fn create_tcp_client_handler(
             h2mux,
         } => {
             let handler: Box<dyn TcpClientHandler> =
-                Box::new(TrojanTcpHandler::new_client(&password, &shadowsocks));
+                Box::new(TrojanTcpHandler::new_client(&password, &shadowsocks)?);
             if let Some(h2mux_config) = h2mux {
                 Ok(Box::new(H2MuxClientHandler::new(
                     Arc::from(handler),
@@ -348,7 +348,7 @@ pub fn create_tcp_client_handler(
             h2mux,
         } => {
             let handler: Box<dyn TcpClientHandler> =
-                Box::new(VmessTcpClientHandler::new(&cipher, &user_id, udp_enabled));
+                Box::new(VmessTcpClientHandler::new(&cipher, &user_id, udp_enabled)?);
             if let Some(h2mux_config) = h2mux {
                 Ok(Box::new(H2MuxClientHandler::new(
                     Arc::from(handler),

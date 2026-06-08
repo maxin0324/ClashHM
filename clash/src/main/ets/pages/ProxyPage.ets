@@ -34,7 +34,7 @@ class ProxyLoadResult {
 @Component
 export struct ProxyPage {
   @State groups: ProxyGroupModel[] = [];
-  @State statusMsg: string = '';
+  @State statusMsg: ResourceStr = '';
   @State sourceMsg: string = '';
   @State testingGroup: string = '';
   @State isLoading: boolean = false;
@@ -77,7 +77,7 @@ export struct ProxyPage {
       }
 
       this.groups = [];
-      this.statusMsg = 'No proxy groups found. Update the active subscription, then refresh.';
+      this.statusMsg = $r('app.string.no_proxy_groups');
       this.sourceMsg = '';
     } catch (e) {
       this.statusMsg = `Failed to load proxy groups: ${String(e)}`;
@@ -403,7 +403,7 @@ export struct ProxyPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Button(this.isLoading ? 'Loading' : 'Refresh')
+        Button(this.isLoading ? $r('app.string.loading') : $r('app.string.refresh'))
           .type(ButtonType.Normal)
           .height(34)
           .fontSize(13)
@@ -422,7 +422,7 @@ export struct ProxyPage {
 
       if (this.statusMsg) {
         Column({ space: 10 }) {
-          Text('No proxy data')
+          Text($r('app.string.no_proxy_data'))
             .fontSize(18)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))

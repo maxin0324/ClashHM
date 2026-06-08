@@ -48,16 +48,19 @@ enum DataCipher {
     None,
 }
 
-impl From<&str> for DataCipher {
-    fn from(name: &str) -> Self {
+impl TryFrom<&str> for DataCipher {
+    type Error = std::io::Error;
+
+    fn try_from(name: &str) -> std::io::Result<Self> {
         match name {
-            "" | "any" => DataCipher::Any,
-            "aes-128-gcm" => DataCipher::Aes128Gcm,
-            "chacha20-poly1305" | "chacha20-ietf-poly1305" => DataCipher::ChaCha20Poly1305,
-            "none" => DataCipher::None,
-            _ => {
-                panic!("Unknown cipher: {name}");
-            }
+            "" | "any" => Ok(DataCipher::Any),
+            "aes-128-gcm" => Ok(DataCipher::Aes128Gcm),
+            "chacha20-poly1305" | "chacha20-ietf-poly1305" => Ok(DataCipher::ChaCha20Poly1305),
+            "none" => Ok(DataCipher::None),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Unknown cipher: {name}"),
+            )),
         }
     }
 }
@@ -87,7 +90,7 @@ impl VmessTcpServerHandler {
         udp_enabled: bool,
         proxy_selector: Arc<ClientProxySelector>,
         resolver: Arc<dyn Resolver>,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         let mut user_id_bytes = parse_uuid(user_id).unwrap();
         user_id_bytes.extend(b"c48619fe-8f02-49e0-b9e9-edf763e17e21");
         let instruction_key: [u8; 16] = compute_md5(&user_id_bytes);
@@ -96,14 +99,14 @@ impl VmessTcpServerHandler {
         let unbound_key = UnboundCipherKey::new(&AES_128, &derived_key[0..16]).unwrap();
         let aead_decrypting_key = CipherDecryptingKey::ecb(unbound_key).unwrap();
 
-        Self {
-            data_cipher: cipher_name.into(),
+        Ok(Self {
+            data_cipher: cipher_name.try_into()?,
             aead_decrypting_key,
             instruction_key,
             udp_enabled,
             proxy_selector,
             resolver,
-        }
+        })
     }
 }
 
@@ -726,7 +729,7 @@ impl std::fmt::Debug for VmessTcpClientHandler {
 }
 
 impl VmessTcpClientHandler {
-    pub fn new(cipher_name: &str, user_id: &str, udp_enabled: bool) -> Self {
+    pub fn new(cipher_name: &str, user_id: &str, udp_enabled: bool) -> std::io::Result<Self> {
         let mut user_id_bytes = parse_uuid(user_id).unwrap();
         user_id_bytes.extend(b"c48619fe-8f02-49e0-b9e9-edf763e17e21");
         let instruction_key: [u8; 16] = compute_md5(&user_id_bytes);
@@ -735,12 +738,12 @@ impl VmessTcpClientHandler {
         let unbound_key = UnboundCipherKey::new(&AES_128, &derived_key[0..16]).unwrap();
         let aead_encrypting_key = CipherEncryptingKey::ecb(unbound_key).unwrap();
 
-        Self {
-            data_cipher: cipher_name.into(),
+        Ok(Self {
+            data_cipher: cipher_name.try_into()?,
             aead_encrypting_key,
             instruction_key,
             udp_enabled,
-        }
+        })
     }
 }
 
