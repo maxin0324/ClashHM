@@ -68,6 +68,7 @@
     { "name": "search", "value": "Search" },
     { "name": "filter_placeholder", "value": "Filter by host, rule, proxy..." },
     { "name": "diagnostics", "value": "Diagnostics" },
+    { "name": "latest_status", "value": "Latest status" },
     { "name": "no_proxy_groups", "value": "No proxy groups found. Update the active subscription, then refresh." },
     { "name": "connect_vpn_to_test", "value": "Connect VPN to test latency" },
     { "name": "latency_updated", "value": "Latency updated" },

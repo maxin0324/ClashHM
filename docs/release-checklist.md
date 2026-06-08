@@ -84,8 +84,8 @@ Unsupported protocols must produce clear diagnostics instead of silent fallback.
 
 - Do not commit HAP outputs or `build/` directories.
 - Keep only split `libclashhm_native_core.a.partNN` files in Git; do not track the reconstructed full `.a`.
+- Keep split native-core parts in Git LFS so fresh clones receive real binary chunks instead of pointer files.
 - Publish `scripts/package-native-core-artifact.sh` output with release builds.
-- Move the split static library out of Git history and into Git LFS or release artifacts once the native-core ABI stabilizes.
 - Keep README focused on app usage and current support status.
 - Keep implementation details in `docs/`.
 

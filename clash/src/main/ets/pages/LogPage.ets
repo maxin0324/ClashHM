@@ -4,6 +4,7 @@ import { LogEntry, LogType } from '../models/LogEntry';
 import { LogItem, LogItemModel } from '../components/LogItem';
 import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
 import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 interface ExtensionConnectionInfo {
   id: string;
@@ -28,9 +29,11 @@ struct LogPage {
   @State filterText: string = '';
   @State diagnosticText: string = '';
   @State isLive: boolean = true;
+  @State copyStatus: string = '';
   private service: IClashService | null = null;
   private pollTimer: number = -1;
   private listScroller: Scroller = new Scroller();
+  private logHistory: LogEntry[] = [];
 
   aboutToAppear(): void {
     try {
@@ -52,16 +55,55 @@ struct LogPage {
     }
     await this.loadDiagnostics();
     const rawLogs = await this.getConnectionLogs();
-    let filtered = rawLogs;
+    this.mergeConnectionLogs(rawLogs);
+    this.applyFilter();
+  }
+
+  private applyFilter(): void {
+    let filtered = this.logHistory;
     if (this.filterText.length > 0) {
       const keyword = this.filterText.toLowerCase();
-      filtered = rawLogs.filter((l: LogEntry) =>
+      filtered = this.logHistory.filter((l: LogEntry) =>
         l.host.toLowerCase().includes(keyword) ||
+        l.destinationIP.toLowerCase().includes(keyword) ||
         l.rule.toLowerCase().includes(keyword) ||
         l.proxyChain.join(' ').toLowerCase().includes(keyword)
       );
     }
-    this.logs = filtered.map((l: LogEntry) => LogItemModel.fromLogEntry(l));
+    this.logs = filtered
+      .slice()
+      .sort((a: LogEntry, b: LogEntry) => b.timestamp - a.timestamp)
+      .map((l: LogEntry) => LogItemModel.fromLogEntry(l));
+  }
+
+  private mergeConnectionLogs(incoming: LogEntry[]): void {
+    const now = Date.now();
+    for (const entry of incoming) {
+      const stableId = this.stableLogId(entry);
+      const index = this.logHistory.findIndex((item: LogEntry) => item.id === stableId);
+      entry.id = stableId;
+      if (index >= 0) {
+        const old = this.logHistory[index];
+        entry.timestamp = old.timestamp;
+        this.logHistory[index] = entry;
+      } else {
+        entry.timestamp = entry.timestamp > 0 ? entry.timestamp : now;
+        this.logHistory.push(entry);
+      }
+    }
+    if (this.logHistory.length > 500) {
+      this.logHistory = this.logHistory
+        .slice()
+        .sort((a: LogEntry, b: LogEntry) => b.timestamp - a.timestamp)
+        .slice(0, 500);
+    }
+  }
+
+  private stableLogId(entry: LogEntry): string {
+    if (entry.id.length > 0) {
+      return entry.id;
+    }
+    return `${entry.network}:${entry.sourceIP}:${entry.sourcePort}->${entry.host || entry.destinationIP}:${entry.destinationPort}`;
   }
 
   private async loadDiagnostics(): Promise<void> {
@@ -155,8 +197,44 @@ struct LogPage {
       if (this.service.getState() === ConnectState.CONNECTED) {
         await this.service.closeAllConnections();
       }
+      this.logHistory = [];
       this.logs = [];
     }
+  }
+
+  private async copyVisibleLogs(): Promise<void> {
+    const text = this.buildCopyText();
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      await pasteboard.getSystemPasteboard().setData(data);
+      this.copyStatus = 'Copied';
+    } catch (e) {
+      this.copyStatus = `Copy failed: ${String(e)}`;
+    }
+  }
+
+  private buildCopyText(): string {
+    const lines: string[] = [];
+    if (this.diagnosticText.length > 0) {
+      lines.push('[Diagnostics]');
+      lines.push(this.diagnosticText);
+      lines.push('');
+    }
+    lines.push('[Connections]');
+    for (const item of this.logs) {
+      const target = item.host.length > 0 ? item.host : item.destinationIP;
+      const chain = item.proxyChain.join(' -> ');
+      lines.push(`${this.formatTime(item.timestamp)} ${item.network} ${target}:${item.destinationPort} rule=${item.rule} proxy=${chain} up=${item.uploadBytes} down=${item.downloadBytes}`);
+    }
+    return lines.join('\n');
+  }
+
+  private formatTime(ts: number): string {
+    const d = new Date(ts);
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
   }
 
   build() {
@@ -202,6 +280,20 @@ struct LogPage {
         })
         .margin({ right: 10 })
 
+        Button($r('app.string.copy'))
+          .type(ButtonType.Normal)
+          .height(34)
+          .fontSize(12)
+          .fontColor($r('app.color.primary'))
+          .backgroundColor($r('app.color.card_bg'))
+          .borderRadius(8)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .padding({ left: 12, right: 12 })
+          .onClick(() => {
+            this.copyVisibleLogs();
+          })
+          .margin({ right: 8 })
+
         Button($r('app.string.clear'))
           .type(ButtonType.Normal)
           .height(34)
@@ -233,6 +325,9 @@ struct LogPage {
             this.filterText = value;
             this.loadLogs();
           })
+          .onSubmit(() => {
+            this.applyFilter();
+          })
       }
       .width('100%')
       .padding({ left: 12, right: 12 })
@@ -244,7 +339,7 @@ struct LogPage {
 
       if (this.diagnosticText) {
         Column({ space: 6 }) {
-          Text($r('app.string.diagnostics'))
+          Text($r('app.string.latest_status'))
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary'))
@@ -262,6 +357,14 @@ struct LogPage {
         .backgroundColor($r('app.color.card_bg'))
         .borderRadius(8)
         .border({ width: 1, color: $r('app.color.divider') })
+      }
+
+      if (this.copyStatus) {
+        Text(this.copyStatus)
+          .fontSize(10)
+          .fontColor(this.copyStatus === 'Copied' ? $r('app.color.connected_color') : $r('app.color.error_color'))
+          .width('100%')
+          .padding({ left: 16, right: 16, bottom: 8 })
       }
 
       List({ scroller: this.listScroller }) {

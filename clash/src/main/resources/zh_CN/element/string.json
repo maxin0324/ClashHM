@@ -68,6 +68,7 @@
     { "name": "search", "value": "搜索" },
     { "name": "filter_placeholder", "value": "按域名、规则、代理筛选..." },
     { "name": "diagnostics", "value": "诊断" },
+    { "name": "latest_status", "value": "最新状态" },
     { "name": "no_proxy_groups", "value": "未找到代理组，请更新活跃订阅后刷新。" },
     { "name": "connect_vpn_to_test", "value": "请先连接 VPN 以测试延迟" },
     { "name": "latency_updated", "value": "延迟已更新" },

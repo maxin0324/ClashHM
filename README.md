@@ -112,12 +112,20 @@ Embedded Rust native core · System VPN Extension · No foreground process neede
 | DevEco Studio | 5.0+ |
 | HarmonyOS NEXT SDK | latest |
 | Target device | ARM64 HarmonyOS NEXT |
+| Git LFS | required for prebuilt native-core parts |
 | Rust *(optional)* | stable, with `aarch64-unknown-linux-ohos` target |
 
 ### With prebuilt native core
 
 The repo includes split `.a` parts under `clash/src/main/cpp/native-core/`.
 CMake reassembles them automatically — **no Rust toolchain needed**.
+These parts are stored with Git LFS, so run this once after a fresh clone:
+
+```bash
+git lfs install
+git lfs pull
+bash scripts/verify-native-core-artifact.sh
+```
 
 ```bash
 # Open in DevEco Studio → Sync → Build HAP → Run on device

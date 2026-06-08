@@ -57,20 +57,30 @@ struct Index {
 
   @Builder
   tabBuilder(title: ResourceStr, icon: string, index: number) {
-    Column() {
+    Column({ space: 2 }) {
       Text(icon)
-        .fontSize(index === 3 ? 25 : 21)
+        .width(34)
+        .height(24)
+        .fontSize(index === 0 ? 19 : 20)
+        .lineHeight(24)
         .fontWeight(this.currentIndex === index ? FontWeight.Bold : FontWeight.Medium)
         .fontColor(this.currentIndex === index ? $r('app.color.primary') : $r('app.color.text_secondary'))
+        .textAlign(TextAlign.Center)
       Text(title)
+        .width('100%')
+        .height(14)
         .fontSize(10)
+        .lineHeight(14)
         .fontWeight(this.currentIndex === index ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(this.currentIndex === index ? $r('app.color.primary') : $r('app.color.text_secondary'))
-        .margin({ top: 2 })
+        .textAlign(TextAlign.Center)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%')
-    .height('100%')
+    .height(56)
     .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
     .onClick(() => {
       this.currentIndex = index;
       this.tabsController.changeIndex(index);
@@ -170,7 +180,7 @@ struct Index {
         .tabBar(this.tabBuilder(this.tabTitles[3], this.tabIcons[3], 3))
       }
       .scrollable(false)
-      .barHeight(58)
+      .barHeight(64)
       .layoutWeight(1)
       .onChange((index: number) => {
         this.currentIndex = index;
