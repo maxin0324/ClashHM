@@ -332,7 +332,7 @@ mod tests {
     use crate::config::TlsFingerprint;
 
     fn make_test_hello() -> Vec<u8> {
-        let profile = get_profile(&TlsFingerprint::Chrome);
+        let profile = get_profile(&TlsFingerprint::Chrome).unwrap();
         let random = [0x42u8; 32];
         let session_id = [0x99u8; 32];
         let pubkey = [0xAAu8; 32];
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn record_version_is_tls10() {
-        let profile = get_profile(&TlsFingerprint::Chrome);
+        let profile = get_profile(&TlsFingerprint::Chrome).unwrap();
         let record = build_client_hello_record(
             profile,
             &[0u8; 32],
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn padding_targets_512_total() {
-        let profile = get_profile(&TlsFingerprint::Chrome);
+        let profile = get_profile(&TlsFingerprint::Chrome).unwrap();
         let record = build_client_hello_record(
             profile,
             &[0u8; 32],

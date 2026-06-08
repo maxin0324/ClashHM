@@ -9,6 +9,7 @@ declare module 'libclash.so' {
     nativeCoreLoadConfig: (configText: string) => number;
     nativeCoreParseProxies: (configText: string) => string;
     nativeCoreSelectProxy: (groupName: string, proxyName: string) => number;
+    nativeCoreSetMode: (mode: string) => number;
     nativeCoreTestDelay: (proxyName: string, url: string, timeout: number) => number;
     nativeCoreGetTraffic: () => string;
     nativeCoreGetConnections: () => string;
@@ -23,6 +24,7 @@ declare module 'libclash.so' {
   export const nativeCoreLoadConfig: (configText: string) => number;
   export const nativeCoreParseProxies: (configText: string) => string;
   export const nativeCoreSelectProxy: (groupName: string, proxyName: string) => number;
+  export const nativeCoreSetMode: (mode: string) => number;
   export const nativeCoreTestDelay: (proxyName: string, url: string, timeout: number) => number;
   export const nativeCoreGetTraffic: () => string;
   export const nativeCoreGetConnections: () => string;

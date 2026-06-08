@@ -1,4 +1,5 @@
 use std::io;
+use std::io::Write;
 use std::sync::{Arc, OnceLock};
 
 use aws_lc_rs::digest;
@@ -16,6 +17,41 @@ fn hex_encode(bytes: &[u8]) -> String {
 pub struct CertVerifyInfo {
     pub sig_algorithm: u16,
     pub signature: Vec<u8>,
+}
+
+struct BoundedVecWriter {
+    buf: Vec<u8>,
+    limit: usize,
+}
+
+impl BoundedVecWriter {
+    fn new(limit: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(limit),
+            limit,
+        }
+    }
+
+    fn into_inner(self) -> Vec<u8> {
+        self.buf
+    }
+}
+
+impl Write for BoundedVecWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.buf.len().saturating_add(bytes.len()) > self.limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Decompressed certificate length exceeds declared size",
+            ));
+        }
+        self.buf.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
@@ -127,6 +163,92 @@ pub fn extract_certificate_chain(certificate_message: &[u8]) -> io::Result<Vec<V
         ));
     }
     Ok(certs)
+}
+
+pub fn decompress_certificate_message(compressed_msg: &[u8]) -> io::Result<Vec<u8>> {
+    if compressed_msg.len() < 4 + 8 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "CompressedCertificate message too short",
+        ));
+    }
+
+    let body = &compressed_msg[4..];
+    let handshake_len = u32::from_be_bytes([
+        0,
+        compressed_msg[1],
+        compressed_msg[2],
+        compressed_msg[3],
+    ]) as usize;
+    if handshake_len != body.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "CompressedCertificate handshake length mismatch",
+        ));
+    }
+
+    let algorithm = u16::from_be_bytes([body[0], body[1]]);
+    let uncompressed_length = u32::from_be_bytes([0, body[2], body[3], body[4]]) as usize;
+    let compressed_len = u32::from_be_bytes([0, body[5], body[6], body[7]]) as usize;
+
+    if 8 + compressed_len > body.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "CompressedCertificate data truncated",
+        ));
+    }
+    if 8 + compressed_len != body.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "CompressedCertificate contains trailing data",
+        ));
+    }
+    let compressed_data = &body[8..8 + compressed_len];
+
+    if algorithm != 0x0002 {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("Unsupported certificate compression algorithm: 0x{:04x}", algorithm),
+        ));
+    }
+
+    if uncompressed_length > 1 << 22 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Uncompressed certificate length too large",
+        ));
+    }
+
+    let mut decompressed = BoundedVecWriter::new(uncompressed_length);
+    brotli::BrotliDecompress(&mut std::io::Cursor::new(compressed_data), &mut decompressed)
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Brotli decompression failed: {}", e),
+            )
+        })?;
+    let decompressed = decompressed.into_inner();
+
+    if decompressed.len() != uncompressed_length {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Decompressed length mismatch: expected {}, got {}",
+                uncompressed_length,
+                decompressed.len()
+            ),
+        ));
+    }
+
+    let cert_len = decompressed.len();
+    let mut full_message = Vec::with_capacity(4 + cert_len);
+    full_message.push(0x0b);
+    full_message.push(((cert_len >> 16) & 0xff) as u8);
+    full_message.push(((cert_len >> 8) & 0xff) as u8);
+    full_message.push((cert_len & 0xff) as u8);
+    full_message.extend_from_slice(&decompressed);
+
+    Ok(full_message)
 }
 
 pub fn verify_certificate_chain(cert_chain: &[Vec<u8>], server_name: &str) -> io::Result<()> {
@@ -394,6 +516,47 @@ pub fn verify_certificate_fingerprint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    fn push_u24(out: &mut Vec<u8>, value: usize) {
+        out.push(((value >> 16) & 0xff) as u8);
+        out.push(((value >> 8) & 0xff) as u8);
+        out.push((value & 0xff) as u8);
+    }
+
+    fn brotli_compress(bytes: &[u8]) -> Vec<u8> {
+        let mut writer = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+        writer.write_all(bytes).unwrap();
+        writer.into_inner()
+    }
+
+    fn compressed_certificate_message(
+        algorithm: u16,
+        uncompressed_length: usize,
+        compressed_data: &[u8],
+    ) -> Vec<u8> {
+        let body_len = 8 + compressed_data.len();
+        let mut msg = Vec::new();
+        msg.push(0x19);
+        push_u24(&mut msg, body_len);
+        msg.extend_from_slice(&algorithm.to_be_bytes());
+        push_u24(&mut msg, uncompressed_length);
+        push_u24(&mut msg, compressed_data.len());
+        msg.extend_from_slice(compressed_data);
+        msg
+    }
+
+    fn certificate_body() -> Vec<u8> {
+        let cert = [0x42u8];
+        let cert_entry_len = 3 + cert.len() + 2;
+        let mut body = Vec::new();
+        body.push(0); // certificate_request_context length
+        push_u24(&mut body, cert_entry_len);
+        push_u24(&mut body, cert.len());
+        body.extend_from_slice(&cert);
+        body.extend_from_slice(&0u16.to_be_bytes()); // certificate extensions length
+        body
+    }
 
     #[test]
     fn extract_cert_verify_info_valid() {
@@ -457,5 +620,87 @@ mod tests {
     fn empty_fingerprints_passes() {
         let result = verify_certificate_fingerprint(b"anything", &[]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn decompress_certificate_message_valid_brotli() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let msg = compressed_certificate_message(0x0002, body.len(), &compressed);
+
+        let decompressed = decompress_certificate_message(&msg).unwrap();
+        assert_eq!(decompressed[0], 0x0b);
+        assert_eq!(&decompressed[4..], body.as_slice());
+
+        let chain = extract_certificate_chain(&decompressed).unwrap();
+        assert_eq!(chain, vec![vec![0x42]]);
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_unsupported_algorithm() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let msg = compressed_certificate_message(0x0001, body.len(), &compressed);
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_truncated_data() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let mut msg = compressed_certificate_message(0x0002, body.len(), &compressed);
+        msg.pop();
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_trailing_data() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let mut msg = compressed_certificate_message(0x0002, body.len(), &compressed);
+        let body_len = 8 + compressed.len() + 1;
+        msg[1] = ((body_len >> 16) & 0xff) as u8;
+        msg[2] = ((body_len >> 8) & 0xff) as u8;
+        msg[3] = (body_len & 0xff) as u8;
+        msg.push(0);
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_handshake_length_mismatch() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let mut msg = compressed_certificate_message(0x0002, body.len(), &compressed);
+        msg[3] = msg[3].wrapping_add(1);
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_declared_length_mismatch() {
+        let body = certificate_body();
+        let compressed = brotli_compress(&body);
+        let msg = compressed_certificate_message(0x0002, body.len() + 1, &compressed);
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_output_beyond_declared_length() {
+        let body = vec![0x55; 4096];
+        let compressed = brotli_compress(&body);
+        let msg = compressed_certificate_message(0x0002, 1, &compressed);
+
+        assert!(decompress_certificate_message(&msg).is_err());
+    }
+
+    #[test]
+    fn decompress_certificate_message_rejects_oversized_declared_length() {
+        let msg = compressed_certificate_message(0x0002, (1 << 22) + 1, &[]);
+
+        assert!(decompress_certificate_message(&msg).is_err());
     }
 }

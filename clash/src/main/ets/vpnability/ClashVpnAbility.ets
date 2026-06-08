@@ -10,6 +10,7 @@ import {
   callNativeCoreGetTraffic,
   callNativeCoreInit,
   callNativeCoreSelectProxy,
+  callNativeCoreSetMode,
   callNativeCoreStartTun,
   callNativeCoreStop,
   callNativeCoreTestDelay
@@ -28,6 +29,7 @@ interface NativeCoreCommandEventParams {
   commandType?: string;
   groupName?: string;
   proxyName?: string;
+  mode?: string;
   url?: string;
   timeoutMs?: number;
 }
@@ -475,6 +477,11 @@ export default class ClashVpnAbility extends VpnExtensionAbility {
         resultData = callNativeCoreGetProxies();
       } else if (commandType === 'selectProxy') {
         code = callNativeCoreSelectProxy(params.groupName || '', params.proxyName || '');
+        if (code < 0 && !this.nativeCoreLoaded) {
+          error = 'native core is not running';
+        }
+      } else if (commandType === 'setMode') {
+        code = callNativeCoreSetMode(params.mode || 'rule');
         if (code < 0 && !this.nativeCoreLoaded) {
           error = 'native core is not running';
         }

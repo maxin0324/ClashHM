@@ -78,6 +78,7 @@ struct RouteDebug {
     fake_dns: String,
     tcp_target: String,
     tcp_remote: String,
+    proxy_request: String,
     udp_target: String,
     tls_sni: String,
     interesting: String,
@@ -116,6 +117,14 @@ fn record_tcp_remote(remote: &NetLocation) {
     if let Ok(mut guard) = route_debug().lock() {
         let entry = format!("tcp-remote {remote}");
         guard.tcp_remote = remote.to_string();
+        push_route_history(&mut guard, &entry);
+    }
+}
+
+pub(crate) fn record_proxy_request(protocol: &str, target: &NetLocation) {
+    if let Ok(mut guard) = route_debug().lock() {
+        let entry = format!("proxy-request {protocol} {target}");
+        guard.proxy_request = format!("{protocol} {target}");
         push_route_history(&mut guard, &entry);
     }
 }
@@ -167,10 +176,11 @@ pub fn reset_traffic_snapshot() {
 pub fn route_debug_json() -> String {
     let guard = route_debug().lock().expect("route debug state poisoned");
     format!(
-        "{{\"fakeDns\":\"{}\",\"tcpTarget\":\"{}\",\"tcpRemote\":\"{}\",\"udpTarget\":\"{}\",\"tlsSni\":\"{}\",\"interesting\":\"{}\",\"history\":[{}]}}",
+        "{{\"fakeDns\":\"{}\",\"tcpTarget\":\"{}\",\"tcpRemote\":\"{}\",\"proxyRequest\":\"{}\",\"udpTarget\":\"{}\",\"tlsSni\":\"{}\",\"interesting\":\"{}\",\"history\":[{}]}}",
         json_escape(&guard.fake_dns),
         json_escape(&guard.tcp_target),
         json_escape(&guard.tcp_remote),
+        json_escape(&guard.proxy_request),
         json_escape(&guard.udp_target),
         json_escape(&guard.tls_sni),
         json_escape(&guard.interesting),

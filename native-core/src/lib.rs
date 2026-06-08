@@ -43,6 +43,7 @@ struct GeositeCategory {
     skipped_regex: usize,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 struct ClashDnsConfig {
     enabled: bool,
@@ -71,6 +72,29 @@ struct RuntimeConfig {
     tls_client_mode: TlsClientMode,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionMode {
+    Rule,
+    Global,
+    Direct,
+}
+
+impl ConnectionMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            ConnectionMode::Rule => "rule",
+            ConnectionMode::Global => "global",
+            ConnectionMode::Direct => "direct",
+        }
+    }
+}
+
+impl Default for ConnectionMode {
+    fn default() -> Self {
+        Self::Rule
+    }
+}
+
 #[derive(Default)]
 struct CoreState {
     home_dir: String,
@@ -90,6 +114,7 @@ struct CoreState {
     last_download_total: u64,
     dns_config: ClashDnsConfig,
     runtime_config: RuntimeConfig,
+    connection_mode: ConnectionMode,
 }
 
 static STATE: OnceLock<Mutex<CoreState>> = OnceLock::new();
@@ -1250,6 +1275,30 @@ fn parse_runtime_config(config: &str) -> RuntimeConfig {
     }
 }
 
+fn parse_connection_mode(config: &str) -> ConnectionMode {
+    let root = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+        Ok(root) => root,
+        Err(_) => return ConnectionMode::Rule,
+    };
+    let serde_yaml::Value::Mapping(ref mapping) = root else {
+        return ConnectionMode::Rule;
+    };
+    yaml_mapping_get(mapping, "mode")
+        .map(yaml_value_to_string)
+        .map(|mode| parse_connection_mode_text(&mode))
+        .unwrap_or(ConnectionMode::Rule)
+}
+
+fn parse_connection_mode_text(mode: &str) -> ConnectionMode {
+    if mode.eq_ignore_ascii_case("global") {
+        ConnectionMode::Global
+    } else if mode.eq_ignore_ascii_case("direct") {
+        ConnectionMode::Direct
+    } else {
+        ConnectionMode::Rule
+    }
+}
+
 fn parse_rule_line(line: &str) -> Option<ClashRule> {
     let mut parts = line
         .split(',')
@@ -1852,13 +1901,9 @@ fn wrap_tls(
     } else {
         sni
     };
-    let skip_verify = proxy_field(proxy, "skip-cert-verify");
     let mut out = format!("{pad}type: tls\n");
-    if !skip_verify.is_empty() {
-        out.push_str(&format!(
-            "{pad}verify: {}\n",
-            if truthy(skip_verify) { "false" } else { "true" }
-        ));
+    if let Some(verify) = tls_verify_yaml_value(proxy, runtime_config) {
+        out.push_str(&format!("{pad}verify: {verify}\n"));
     }
     let server_fp = proxy_field(proxy, "server-fingerprint");
     if !server_fp.is_empty() {
@@ -1901,6 +1946,30 @@ fn wrap_tls(
         out.push('\n');
     }
     out
+}
+
+fn tls_verify_yaml_value(
+    proxy: &ProxyNode,
+    runtime_config: &RuntimeConfig,
+) -> Option<&'static str> {
+    let skip_verify = proxy_field(proxy, "skip-cert-verify");
+    if !skip_verify.is_empty() {
+        return Some(if truthy(skip_verify) { "false" } else { "true" });
+    }
+
+    if runtime_config.tls_client_mode == TlsClientMode::Chrome
+        && proxy.proxy_type.eq_ignore_ascii_case("trojan")
+    {
+        let server = proxy_field(proxy, "server");
+        let sni = proxy_field_any(proxy, &["sni", "servername", "server-name", "server_name"]);
+        if !server.is_empty() && !sni.is_empty() && !server.eq_ignore_ascii_case(&sni) {
+            // Clash subscriptions often omit skip-cert-verify for Trojan nodes
+            // that intentionally front through an SNI different from server.
+            return Some("false");
+        }
+    }
+
+    None
 }
 
 fn wrap_reality(proxy: &ProxyNode, inner: String, indent: usize) -> Result<String, String> {
@@ -2091,6 +2160,7 @@ fn append_quic_client_settings(proxy: &ProxyNode, out: &mut String) {
     }
 }
 
+#[allow(dead_code)]
 fn build_probe_client_group(proxy: &ProxyNode) -> Result<String, String> {
     let chain = build_shoes_client_chain(proxy, &RuntimeConfig::default())?;
     Ok(format!(
@@ -2102,6 +2172,7 @@ fn build_direct_client_chain() -> String {
     "        - protocol:\n            type: direct\n".to_string()
 }
 
+#[allow(dead_code)]
 fn build_rule_client_chain(
     target: &str,
     groups: &[ProxyGroup],
@@ -2607,6 +2678,7 @@ fn build_default_rule(
     build_rule_yaml("0.0.0.0/0", target, groups, proxies, runtime_config)
 }
 
+#[allow(dead_code)]
 fn build_shoes_rules(
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
@@ -2679,6 +2751,7 @@ fn build_shoes_rules_with_runtime(
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn build_shoes_tun_config(
     tun_fd: i32,
     groups: &[ProxyGroup],
@@ -2699,6 +2772,32 @@ fn build_shoes_tun_config_with_runtime(
     Ok(format!(
         "- device_fd: {tun_fd}\n  address: \"10.249.0.1\"\n  netmask: \"255.255.255.252\"\n  mtu: 1400\n  tcp_enabled: true\n  udp_enabled: true\n  icmp_enabled: true\n  rules:\n{rules_yaml}"
     ))
+}
+
+fn effective_rules(
+    mode: ConnectionMode,
+    groups: &[ProxyGroup],
+    rules: &[ClashRule],
+) -> Vec<ClashRule> {
+    match mode {
+        ConnectionMode::Rule => rules.to_vec(),
+        ConnectionMode::Global => {
+            let target = selected_group(groups)
+                .map(|group| group.name.clone())
+                .or_else(|| groups.first().map(|group| group.name.clone()))
+                .unwrap_or_else(|| "DIRECT".to_string());
+            vec![ClashRule {
+                rule_type: "MATCH".to_string(),
+                payload: String::new(),
+                target,
+            }]
+        }
+        ConnectionMode::Direct => vec![ClashRule {
+            rule_type: "MATCH".to_string(),
+            payload: String::new(),
+            target: "DIRECT".to_string(),
+        }],
+    }
 }
 
 #[cfg(feature = "shoes-backend")]
@@ -2963,25 +3062,29 @@ fn running_snapshot(state_running: bool) -> bool {
 }
 
 #[cfg(feature = "shoes-backend")]
+#[allow(dead_code)]
 fn restart_backend_from_state(guard: &CoreState) -> Result<(), String> {
     if guard.tun_fd <= 0 {
         return Err("missing active TUN fd".to_string());
     }
+    let rules = effective_rules(guard.connection_mode, &guard.groups, &guard.rules);
     let shoes_yaml = build_shoes_tun_config_with_runtime(
         guard.tun_fd,
         &guard.groups,
         &guard.proxies,
-        &guard.rules,
+        &rules,
         &guard.runtime_config,
     )?;
     start_shoes_backend(shoes_yaml, guard.dns_config.clone())
 }
 
 #[cfg(not(feature = "shoes-backend"))]
+#[allow(dead_code)]
 fn restart_backend_from_state(_guard: &CoreState) -> Result<(), String> {
     Err("embedded shoes backend is not linked".to_string())
 }
 
+#[allow(dead_code)]
 fn tcp_delay_ms(proxy: &ProxyNode, timeout_ms: i32) -> Result<i32, i32> {
     let server = proxy_field(proxy, "server");
     let port = proxy_field(proxy, "port");
@@ -3194,6 +3297,8 @@ pub extern "C" fn clashhm_native_core_start_tun(
     let (proxies, groups, rules) = parse_clash_config(&config);
     let dns_config = parse_clash_dns_config(&config);
     let runtime_config = parse_runtime_config(&config);
+    let connection_mode = parse_connection_mode(&config);
+    let effective = effective_rules(connection_mode, &groups, &rules);
     let shoes_config = if proxies.is_empty() && groups.is_empty() && !rules.is_empty() {
         Err(format!(
             "no proxies or proxy-groups parsed from Clash config; parserVersion={}; rules={}; has_proxy_providers={}; has_proxies_section={}; has_proxy_groups_section={}; proxiesSample={}; groupsSample={}",
@@ -3206,7 +3311,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
             json_escape(&section_sample(&config, "proxy-groups:"))
         ))
     } else {
-        build_shoes_tun_config_with_runtime(tun_fd, &groups, &proxies, &rules, &runtime_config)
+        build_shoes_tun_config_with_runtime(tun_fd, &groups, &proxies, &effective, &runtime_config)
     };
     let mut guard = state().lock().unwrap();
     guard.tun_fd = tun_fd;
@@ -3215,6 +3320,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
     guard.rules = rules;
     guard.dns_config = dns_config.clone();
     guard.runtime_config = runtime_config;
+    guard.connection_mode = connection_mode;
     guard.delay_by_proxy.clear();
     guard.running = false;
     guard.last_traffic_at_ms = now_ms();
@@ -3303,6 +3409,7 @@ pub extern "C" fn clashhm_native_core_load_config(clash_config: *const c_char) -
     guard.proxies = proxies;
     guard.groups = groups;
     guard.rules = rules;
+    guard.connection_mode = parse_connection_mode(&config);
     guard.delay_by_proxy.clear();
     guard.status = "config_loaded_for_latency".to_string();
     guard.last_error.clear();
@@ -3359,9 +3466,55 @@ pub extern "C" fn clashhm_native_core_select_proxy(
     }
 
     guard.groups[group_index].now = proxy_name;
-    guard.status = "selection_applied_restart_required".to_string();
-    guard.last_error.clear();
-    0
+    let should_restart = guard.running && guard.tun_fd > 0;
+    if should_restart {
+        match restart_backend_from_state(&guard) {
+            Ok(()) => {
+                guard.status = "selection_applied_backend_restarted".to_string();
+                guard.started_at_ms = now_ms();
+                guard.last_error.clear();
+                0
+            }
+            Err(error) => {
+                guard.status = format!("selection_restart_error: {error}");
+                guard.last_error = error;
+                -4
+            }
+        }
+    } else {
+        guard.status = "selection_applied_pending_start".to_string();
+        guard.last_error.clear();
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn clashhm_native_core_set_mode(mode: *const c_char) -> c_int {
+    let Ok(mode) = cstr_to_string(mode) else {
+        return -1;
+    };
+    let mut guard = state().lock().unwrap();
+    guard.connection_mode = parse_connection_mode_text(&mode);
+    let should_restart = guard.running && guard.tun_fd > 0;
+    if should_restart {
+        match restart_backend_from_state(&guard) {
+            Ok(()) => {
+                guard.status = "mode_applied_backend_restarted".to_string();
+                guard.started_at_ms = now_ms();
+                guard.last_error.clear();
+                0
+            }
+            Err(error) => {
+                guard.status = format!("mode_restart_error: {error}");
+                guard.last_error = error;
+                -2
+            }
+        }
+    } else {
+        guard.status = "mode_applied_pending_start".to_string();
+        guard.last_error.clear();
+        0
+    }
 }
 
 #[no_mangle]
@@ -3469,7 +3622,7 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         TlsClientMode::Rustls => "rustls",
     };
     into_c_string(format!(
-        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"routeDebug\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"tlsClientMode\":\"{}\",\"parserVersion\":\"{}\"}}",
+        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"routeDebug\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"tlsClientMode\":\"{}\",\"connectionMode\":\"{}\",\"parserVersion\":\"{}\"}}",
         if running { "true" } else { "false" },
         json_escape(&guard.engine),
         guard.tun_fd,
@@ -3488,6 +3641,7 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         uptime_ms,
         guard.last_delay_ms,
         tls_client_mode,
+        guard.connection_mode.as_str(),
         json_escape(PARSER_VERSION)
     ))
 }
@@ -4482,6 +4636,116 @@ proxy-groups:
     }
 
     #[test]
+    fn chrome_trojan_with_fronting_sni_uses_compat_certificate_verification() {
+        let config = r#"
+proxies:
+  - { name: Trojan, type: trojan, server: proxy.example.com, port: 443, password: secret, sni: front.example.com }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - Trojan
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("type: tls"), "{shoes_config}");
+        assert!(
+            shoes_config.contains("client_fingerprint: \"chrome\""),
+            "{shoes_config}"
+        );
+        assert!(shoes_config.contains("verify: false"), "{shoes_config}");
+    }
+
+    #[test]
+    fn chrome_trojan_with_matching_sni_keeps_strict_certificate_verification() {
+        let config = r#"
+proxies:
+  - { name: Trojan, type: trojan, server: proxy.example.com, port: 443, password: secret, sni: proxy.example.com }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - Trojan
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let shoes_config = build_shoes_tun_config(28, &groups, &proxies, &rules).unwrap();
+        assert!(shoes_config.contains("type: tls"), "{shoes_config}");
+        assert!(
+            shoes_config.contains("client_fingerprint: \"chrome\""),
+            "{shoes_config}"
+        );
+        assert!(!shoes_config.contains("verify: false"), "{shoes_config}");
+    }
+
+    #[test]
+    fn rustls_trojan_keeps_strict_certificate_verification_by_default() {
+        let config = r#"
+proxies:
+  - { name: Trojan, type: trojan, server: proxy.example.com, port: 443, password: secret, sni: front.example.com }
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - Trojan
+"#;
+        let (proxies, groups, rules) = parse_clash_config(config);
+        let runtime_config = RuntimeConfig {
+            tls_client_mode: TlsClientMode::Rustls,
+        };
+        let shoes_config =
+            build_shoes_tun_config_with_runtime(28, &groups, &proxies, &rules, &runtime_config)
+                .unwrap();
+        assert!(shoes_config.contains("type: tls"), "{shoes_config}");
+        assert!(
+            !shoes_config.contains("client_fingerprint:"),
+            "{shoes_config}"
+        );
+        assert!(!shoes_config.contains("verify: false"), "{shoes_config}");
+    }
+
+    #[test]
+    fn global_mode_routes_everything_to_selected_group() {
+        let groups = vec![ProxyGroup {
+            name: "Proxy".to_string(),
+            group_type: "select".to_string(),
+            now: "A".to_string(),
+            all: vec!["A".to_string(), "B".to_string()],
+        }];
+        let rules = vec![ClashRule {
+            rule_type: "DOMAIN-SUFFIX".to_string(),
+            payload: "example.com".to_string(),
+            target: "DIRECT".to_string(),
+        }];
+
+        let effective = effective_rules(ConnectionMode::Global, &groups, &rules);
+
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].rule_type, "MATCH");
+        assert_eq!(effective[0].target, "Proxy");
+    }
+
+    #[test]
+    fn direct_mode_routes_everything_direct() {
+        let groups = vec![ProxyGroup {
+            name: "Proxy".to_string(),
+            group_type: "select".to_string(),
+            now: "A".to_string(),
+            all: vec!["A".to_string()],
+        }];
+        let rules = vec![ClashRule {
+            rule_type: "MATCH".to_string(),
+            payload: String::new(),
+            target: "Proxy".to_string(),
+        }];
+
+        let effective = effective_rules(ConnectionMode::Direct, &groups, &rules);
+
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].rule_type, "MATCH");
+        assert_eq!(effective[0].target, "DIRECT");
+    }
+
+    #[test]
     fn builds_naiveproxy_config_with_tls_and_h2() {
         let config = r#"
 proxies:
@@ -4708,10 +4972,10 @@ proxies:
   -
     name: 'Trojan Nested'
     type: trojan
-    server: 42.193.214.122
+    server: trojan-nested.example.com
     port: 4005
     password: secret
-    sni: baidu.com
+    sni: front.example.com
 proxy-groups:
   -
     name: '🚀 节点选择'
@@ -4769,10 +5033,10 @@ proxies:
   -
     name: '🇭🇰 套餐到期日期：2027-04-23'
     type: trojan
-    server: 42.193.214.122
+    server: metadata.example.com
     port: 4005
     password: secret
-    sni: baidu.com
+    sni: front.example.com
   -
     name: 'HK Real'
     type: trojan

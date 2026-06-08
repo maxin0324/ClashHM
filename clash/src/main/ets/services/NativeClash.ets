@@ -42,6 +42,10 @@ export function callNativeCoreSelectProxy(groupName: string, proxyName: string):
   return getNativeModule().nativeCoreSelectProxy(groupName, proxyName);
 }
 
+export function callNativeCoreSetMode(mode: string): number {
+  return getNativeModule().nativeCoreSetMode(mode);
+}
+
 export function callNativeCoreTestDelay(proxyName: string, url: string, timeout: number): number {
   return getNativeModule().nativeCoreTestDelay(proxyName, url, timeout);
 }

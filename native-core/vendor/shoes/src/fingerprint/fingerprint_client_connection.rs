@@ -26,8 +26,9 @@ use crate::slide_buffer::SlideBuffer;
 use crate::util::allocate_vec;
 
 use super::fingerprint_cert_verify::{
-    extract_cert_verify_info, extract_certificate_chain, verify_certificate_chain,
-    verify_certificate_fingerprint, verify_certificate_verify_signature,
+    decompress_certificate_message, extract_cert_verify_info, extract_certificate_chain,
+    verify_certificate_chain, verify_certificate_fingerprint,
+    verify_certificate_verify_signature,
 };
 use super::fingerprint_client_hello::construct_fingerprint_client_hello;
 use super::fingerprint_profiles::get_profile;
@@ -82,6 +83,26 @@ pub struct FingerprintTlsClientConnection {
 
     received_close_notify: bool,
     fatal_error: Option<io::ErrorKind>,
+}
+
+fn extract_certificate_chain_from_handshake_message(
+    handshake_message: &[u8],
+) -> io::Result<Option<Vec<Vec<u8>>>> {
+    if handshake_message.len() < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Handshake message too short",
+        ));
+    }
+    let msg_type = handshake_message[0];
+    if msg_type == HANDSHAKE_TYPE_CERTIFICATE {
+        return extract_certificate_chain(handshake_message).map(Some);
+    }
+    if msg_type == 0x19 {
+        let decompressed = decompress_certificate_message(handshake_message)?;
+        return extract_certificate_chain(&decompressed).map(Some);
+    }
+    Ok(None)
 }
 
 impl FingerprintTlsClientConnection {
@@ -427,10 +448,9 @@ impl FingerprintTlsClientConnection {
                 break;
             }
 
-            if msg_type == HANDSHAKE_TYPE_CERTIFICATE {
-                let chain = extract_certificate_chain(
-                    &accumulated_plaintext[offset..offset + 4 + msg_len],
-                )?;
+            if let Some(chain) = extract_certificate_chain_from_handshake_message(
+                &accumulated_plaintext[offset..offset + 4 + msg_len],
+            )? {
                 cert_chain = Some(chain);
             }
 
@@ -637,7 +657,17 @@ impl FingerprintTlsClientConnection {
                         }
                     }
                 }
-                _ => unreachable!(),
+                CONTENT_TYPE_HANDSHAKE => {
+                    // TLS 1.3 servers may send post-handshake NewSessionTicket records.
+                    // The client does not use session resumption, so these records can be
+                    // safely ignored instead of aborting an otherwise valid connection.
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unexpected encrypted TLS content type: 0x{content_type:02x}"),
+                    ));
+                }
             }
 
             self.ciphertext_read_buf.consume(total_record_len);
@@ -715,6 +745,79 @@ impl FingerprintTlsClientConnection {
         let mut encryptor = RecordEncryptor::new(app_write_key, app_write_iv, &mut self.write_seq);
         let _ = encryptor.encrypt_close_notify(&mut self.ciphertext_write_buf);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn push_u24(out: &mut Vec<u8>, value: usize) {
+        out.push(((value >> 16) & 0xff) as u8);
+        out.push(((value >> 8) & 0xff) as u8);
+        out.push((value & 0xff) as u8);
+    }
+
+    fn certificate_body() -> Vec<u8> {
+        let cert = [0x42u8];
+        let cert_entry_len = 3 + cert.len() + 2;
+        let mut body = Vec::new();
+        body.push(0);
+        push_u24(&mut body, cert_entry_len);
+        push_u24(&mut body, cert.len());
+        body.extend_from_slice(&cert);
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body
+    }
+
+    fn brotli_compress(bytes: &[u8]) -> Vec<u8> {
+        let mut writer = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+        writer.write_all(bytes).unwrap();
+        writer.into_inner()
+    }
+
+    fn compressed_certificate_message(body: &[u8]) -> Vec<u8> {
+        let compressed = brotli_compress(body);
+        let body_len = 8 + compressed.len();
+        let mut msg = Vec::new();
+        msg.push(0x19);
+        push_u24(&mut msg, body_len);
+        msg.extend_from_slice(&0x0002u16.to_be_bytes());
+        push_u24(&mut msg, body.len());
+        push_u24(&mut msg, compressed.len());
+        msg.extend_from_slice(&compressed);
+        msg
+    }
+
+    #[test]
+    fn compressed_certificate_parsing_preserves_transcript_bytes() {
+        let body = certificate_body();
+        let compressed = compressed_certificate_message(&body);
+        let mut accumulated = compressed.clone();
+        let cv_offset = accumulated.len();
+        accumulated.extend_from_slice(&[HANDSHAKE_TYPE_CERTIFICATE_VERIFY, 0, 0, 0]);
+
+        let chain =
+            extract_certificate_chain_from_handshake_message(&accumulated[..cv_offset]).unwrap();
+        assert_eq!(chain, Some(vec![vec![0x42]]));
+        assert_eq!(&accumulated[..cv_offset], compressed.as_slice());
+        assert_eq!(accumulated[0], 0x19);
+
+        let transcript_prefix = b"clienthello-serverhello";
+        let mut raw_transcript = digest::Context::new(&digest::SHA256);
+        raw_transcript.update(transcript_prefix);
+        raw_transcript.update(&accumulated[..cv_offset]);
+        let raw_hash = raw_transcript.finish();
+
+        let decompressed = decompress_certificate_message(&compressed).unwrap();
+        let mut rewritten_transcript = digest::Context::new(&digest::SHA256);
+        rewritten_transcript.update(transcript_prefix);
+        rewritten_transcript.update(&decompressed);
+        let rewritten_hash = rewritten_transcript.finish();
+
+        assert_ne!(raw_hash.as_ref(), rewritten_hash.as_ref());
+    }
+
 }
 
 pub fn feed_fingerprint_client_connection(

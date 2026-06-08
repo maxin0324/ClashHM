@@ -12,6 +12,7 @@ int clashhm_native_core_load_config(const char* clash_config);
 char* clashhm_native_core_get_proxies_json(void);
 char* clashhm_native_core_parse_proxies_json(const char* clash_config);
 int clashhm_native_core_select_proxy(const char* group_name, const char* proxy_name);
+int clashhm_native_core_set_mode(const char* mode);
 int clashhm_native_core_test_delay(const char* proxy_name, const char* url, int timeout_ms);
 char* clashhm_native_core_get_traffic_json(void);
 char* clashhm_native_core_get_status_json(void);

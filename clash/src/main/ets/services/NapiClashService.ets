@@ -158,6 +158,9 @@ export class NapiClashService implements IClashService {
   }
 
   async setMode(mode: ConnectionMode): Promise<void> {
+    if (this.state === ConnectState.CONNECTED) {
+      await new NativeCoreExtensionService(this.context).setMode(mode);
+    }
     this.mode = mode;
   }
 

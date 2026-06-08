@@ -150,6 +150,23 @@ static napi_value NapiNativeCoreSelectProxy(napi_env env, napi_callback_info inf
     return returnInt(env, ret);
 }
 
+static napi_value NapiNativeCoreSetMode(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc < 1) {
+        return returnInt(env, -1);
+    }
+
+    char* mode = getNapiString(env, args[0]);
+    if (!mode) {
+        return returnInt(env, -2);
+    }
+    int ret = clashhm_native_core_set_mode(mode);
+    free(mode);
+    return returnInt(env, ret);
+}
+
 static napi_value NapiNativeCoreTestDelay(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
@@ -194,6 +211,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"nativeCoreLoadConfig", nullptr, NapiNativeCoreLoadConfig, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreParseProxies", nullptr, NapiNativeCoreParseProxies, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreSelectProxy", nullptr, NapiNativeCoreSelectProxy, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeCoreSetMode", nullptr, NapiNativeCoreSetMode, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreTestDelay", nullptr, NapiNativeCoreTestDelay, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreGetTraffic", nullptr, NapiNativeCoreGetTraffic, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeCoreGetConnections", nullptr, NapiNativeCoreGetConnections, nullptr, nullptr, nullptr, napi_default, nullptr},

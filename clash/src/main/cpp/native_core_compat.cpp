@@ -79,6 +79,10 @@ extern "C" int clashhm_native_core_select_proxy(const char* group_name, const ch
     return -1001;
 }
 
+extern "C" int clashhm_native_core_set_mode(const char*) {
+    return -1001;
+}
+
 extern "C" int clashhm_native_core_test_delay(const char* proxy_name, const char* url, int timeout_ms) {
     (void)proxy_name;
     (void)url;

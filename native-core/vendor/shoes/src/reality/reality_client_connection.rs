@@ -815,12 +815,16 @@ impl RealityClientConnection {
                         }
                     }
                 }
-                // CONTENT_TYPE_HANDSHAKE is invalid after handshake complete
-                // strip_content_type() validates and returns error for invalid types
-                _ => unreachable!(
-                    "strip_content_type validates content type; unexpected: 0x{:02x}",
-                    content_type
-                ),
+                CONTENT_TYPE_HANDSHAKE => {
+                    // TLS 1.3 post-handshake NewSessionTicket records are optional for
+                    // this client; ignore them because session resumption is not used.
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unexpected encrypted TLS content type: 0x{content_type:02x}"),
+                    ));
+                }
             }
 
             // Consume the processed record from the buffer (after plaintext borrow ends)

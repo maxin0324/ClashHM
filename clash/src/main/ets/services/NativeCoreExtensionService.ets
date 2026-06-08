@@ -23,6 +23,7 @@ class NativeCoreCommandPayload {
   commandType: string = '';
   groupName: string = '';
   proxyName: string = '';
+  mode: string = '';
   url: string = '';
   timeoutMs: number = 0;
 }
@@ -43,7 +44,11 @@ export class NativeCoreExtensionService {
   }
 
   async selectProxy(groupName: string, proxyName: string): Promise<NativeCoreCommandResult> {
-    return this.sendCommand('selectProxy', groupName, proxyName, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 3000);
+    return this.sendCommand('selectProxy', groupName, proxyName, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 8000);
+  }
+
+  async setMode(mode: string): Promise<NativeCoreCommandResult> {
+    return this.sendCommandWithMode('setMode', mode, Constants.LATENCY_TEST_URL, Constants.LATENCY_TEST_TIMEOUT, 8000);
   }
 
   async testDelay(proxyName: string): Promise<NativeCoreCommandResult> {
@@ -63,6 +68,10 @@ export class NativeCoreExtensionService {
   }
 
   private sendCommand(commandType: string, groupName: string, proxyName: string, url: string, timeoutMs: number, waitMs: number): Promise<NativeCoreCommandResult> {
+    return this.sendCommandWithMode(commandType, '', url, timeoutMs, waitMs, groupName, proxyName);
+  }
+
+  private sendCommandWithMode(commandType: string, mode: string, url: string, timeoutMs: number, waitMs: number, groupName: string = '', proxyName: string = ''): Promise<NativeCoreCommandResult> {
     const commandId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
     return new Promise((resolve, reject) => {
       let finished = false;
@@ -91,6 +100,7 @@ export class NativeCoreExtensionService {
         payload.commandType = commandType;
         payload.groupName = groupName;
         payload.proxyName = proxyName;
+        payload.mode = mode;
         payload.url = url;
         payload.timeoutMs = timeoutMs;
 

@@ -20,6 +20,7 @@ use crate::stream_reader::StreamReader;
 use crate::tcp::tcp_handler::{
     TcpClientHandler, TcpClientSetupResult, TcpServerHandler, TcpServerSetupResult,
 };
+use crate::tun;
 use crate::util::write_all;
 
 #[derive(Debug)]
@@ -230,6 +231,7 @@ impl TcpClientHandler for TrojanTcpHandler {
         write_all(&mut client_stream, &self.password_hash).await?;
         write_all(&mut client_stream, &CRLF_BYTES).await?;
         write_all(&mut client_stream, &[CMD_CONNECT]).await?;
+        tun::record_proxy_request("trojan", remote_location.location());
         let location_bytes = write_location_to_vec(remote_location.location());
         write_all(&mut client_stream, &location_bytes).await?;
         write_all(&mut client_stream, &CRLF_BYTES).await?;
