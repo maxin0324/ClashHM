@@ -1,236 +1,131 @@
 # ClashHM
 
-ClashHM is a Clash-style proxy client for HarmonyOS NEXT. It is built as a native HarmonyOS app and runs its VPN data path inside `VpnExtensionAbility`, so the proxy core stays with the system VPN extension instead of depending on a foreground UI process.
+A Clash-compatible proxy client for **HarmonyOS NEXT**, with an embedded Rust native core running inside the system VPN Extension.
 
-The project is focused on a reliable HarmonyOS NEXT VPN client with subscription management, proxy selection, rule-based routing, traffic stats, and an embedded native core.
+Unlike desktop Clash wrappers, ClashHM runs the entire VPN data path in `VpnExtensionAbility` — no foreground process required to keep the tunnel alive.
 
-It is not a wrapper around a desktop Clash binary. The VPN traffic path is designed for HarmonyOS NEXT and runs inside the system VPN Extension.
+## Features
 
-## Highlights
+- **Native HarmonyOS UI** — ArkTS / ArkUI, light & dark themes, Chinese & English
+- **System VPN integration** — traffic handled by `VpnExtensionAbility`, not the app process
+- **Embedded native core** — Rust proxy engine compiled as a static library, no external binaries
+- **Clash subscription import** — YAML configs and `ss://` `vmess://` `vless://` `trojan://` `hysteria2://` share links
+- **Proxy management** — groups, node selection, Rule / Global / Direct modes
+- **Latency testing** — proxy-chain probe works both before and after VPN connects
+- **Traffic monitoring** — real-time upload/download counters and active connections
 
-- Native HarmonyOS NEXT UI built with ArkTS and ArkUI
-- System VPN integration through `VpnExtensionAbility`
-- Embedded Rust/C++ native core in the VPN Extension
-- Clash subscription import and update
-- Share-link subscription import for common `ss://`, `vmess://`, `vless://`, `trojan://`, `hysteria2://`, and `hy2://` node links, normalized into Clash YAML
-- Proxy groups, node selection, and saved selections
-- Rule / Global / Direct modes
-- Traffic counters and connection status
-- Proxy-chain latency checks before and after VPN connection
-- Initial Hysteria2 and TUIC TCP/UDP outbound support
-- Chinese and English UI
-- Light and dark themes
-- No UI-process mihomo fallback path
+## Supported Protocols
 
-## Current Status
+| Category | Protocols |
+|----------|-----------|
+| **Proxy** | Shadowsocks, VMess, VLESS, Trojan, Hysteria2, TUIC v5, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/S, Direct |
+| **Transport** | TLS, WebSocket, HTTP/2, gRPC, Reality, ShadowTLS, v2ray-plugin WS |
+| **Multiplex** | `mux` / `h2mux` for VMess, VLESS, Trojan |
+| **Rules** | DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, IP-CIDR/6, DST-PORT, GEOIP (MMDB), GEOSITE (dat), RULE-SET, MATCH |
 
-ClashHM is usable on real HarmonyOS NEXT devices for supported protocols. The current architecture is intentionally strict: if a protocol, transport, rule type, or plugin cannot be handled correctly by the embedded core, the app reports an explicit error instead of silently routing traffic incorrectly.
+<details>
+<summary>Known limitations</summary>
 
-Supported node types and options:
-
-- `direct`
-- Shadowsocks
-- Snell
-- AnyTLS
-- NaiveProxy
-- SOCKS5
-- HTTP / HTTPS
-- VMess
-- VLESS
-- Trojan
-- Hysteria2 / HY2
-- TUIC / TUIC v5
-- TLS
-- WebSocket
-- Clash/Xray `network: h2`
-- Clash/Xray `network: grpc`
-- Reality
-- ShadowTLS
-- v2ray-plugin WebSocket wrapping
-- `mux` / `h2mux` options for VMess, VLESS, and Trojan
-- `udp: false` on supported nodes
-
-Supported rule handling currently covers common Clash rules such as:
-
-- `MATCH`
-- `DOMAIN`
-- `DOMAIN-SUFFIX`
-- `DOMAIN-KEYWORD`
-- `IP-CIDR`
-- `IP-CIDR6`
-- `DST-PORT`
-- Expanded local/inline `RULE-SET` entries for common `domain`, `ipcidr`, and `classical` provider formats, including explicit `DOMAIN-KEYWORD`, `GEOIP`, and `GEOSITE` entries; common block-style, flow-style, inline-array, and direct-list provider files are handled by the config merge path
-- Built-in `GEOIP,PRIVATE/LAN`
-- MMDB-backed `GEOIP,<country-code>` country rules, including `GEOIP,CN`
-- Built-in private `GEOSITE,cn/private/local/lan` shortcuts
-- Dat-backed `GEOSITE,<category>` routing from embedded v2fly domain-list-community data
-- `url-test` / `fallback` group selection based on native-core HTTP URL-test latency results
-
-Still unsupported or incomplete:
-
-- Broader Hysteria2/TUIC real-device coverage and remaining Clash option compatibility, including HY2 obfs and non-default TUIC congestion options
-- Advanced or unresolved `RULE-SET` provider forms that cannot be materialized locally
-- Regex-only GEOSITE entries that cannot be represented by the current embedded matcher
+- HY2 obfs and non-default TUIC congestion options not yet implemented
+- Remote-only `RULE-SET` providers that cannot be materialized locally
+- Regex-only GEOSITE entries
 - simple-obfs / obfs Shadowsocks plugins
 
-## Recommended Roadmap
+</details>
 
-The highest-value work is routing and compatibility before adding more protocol families:
+## Architecture
 
-1. Improve remaining dynamic rule-provider compatibility and rule matcher gaps.
-2. Expand provider and subscription compatibility using mihomo/sing-box behavior as references.
-3. Add real-device coverage for HTTP/2 and gRPC transport variants.
-4. Validate Hysteria2 and TUIC TCP/UDP behavior on real devices and broaden Clash option compatibility.
-5. Polish release packaging, screenshots, and user-facing diagnostics.
-
-This order keeps existing supported nodes reliable while reducing cases where a subscription imports successfully but routing is incomplete.
-
-## Why Extension Native Core
-
-Many desktop or Android Clash clients can run a separate long-lived core process. HarmonyOS NEXT has a different lifecycle model, and UI-process based cores are fragile for VPN use.
-
-ClashHM puts the VPN data path into `VpnExtensionAbility`:
-
-```text
-ArkUI app process
-  - subscription management
-  - proxy selection
-  - status display
-  - settings and logs
-          |
-          | CommonEvent command channel
-          v
-VpnExtensionAbility process
-  - system VPN TUN fd
-  - embedded native core
-  - DNS and rule routing
-  - selected proxy protocol client
+```
+┌─────────────────────────────┐
+│  ArkUI App Process          │
+│  ┌────────────────────────┐ │
+│  │ Subscription管理       │ │
+│  │ Proxy选择 & 延迟测试    │ │
+│  │ 流量统计 & 日志         │ │
+│  └──────────┬─────────────┘ │
+└─────────────┼───────────────┘
+              │ CommonEvent IPC
+┌─────────────▼───────────────┐
+│  VpnExtensionAbility        │
+│  ┌────────────────────────┐ │
+│  │ System TUN fd          │ │
+│  │ Embedded native core   │ │
+│  │ DNS → TCP-over-proxy   │ │
+│  │ Rule routing engine    │ │
+│  └────────────────────────┘ │
+└─────────────────────────────┘
 ```
 
-This avoids keeping the app alive with unrelated background capabilities and keeps the network path attached to the system VPN extension.
+See [docs/extension-native-core.md](docs/extension-native-core.md) for details.
 
-More details are available in [docs/extension-native-core.md](docs/extension-native-core.md). Protocol capability details and the backend implementation matrix are tracked in [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md).
+## Quick Start
 
-## Screens and Workflow
-
-1. Add a Clash YAML subscription or common share-link subscription from the Subscribe page.
-2. Open the Proxy page and select a node before connecting.
-3. Tap the connect button on the Home page.
-4. Allow the HarmonyOS VPN permission prompt.
-5. Switch nodes from the Proxy page when needed.
-6. Check logs and traffic stats from the app.
-
-Proxy lists are parsed from the local subscription config, so they should be visible even before the VPN is connected. Disconnected latency checks use the local native-core proxy-chain probe; connected latency checks run through the VPN Extension command channel.
+1. **Add subscription** — paste a Clash YAML URL or share links on the Subscribe page
+2. **Select a node** — pick a proxy from the Proxy page
+3. **Connect** — tap the connect button on Home, approve the VPN permission
+4. **Done** — switch nodes, check latency, view traffic stats anytime
 
 ## Build
 
-### Requirements
+### Prerequisites
 
-- DevEco Studio 5.0 or newer
-- HarmonyOS NEXT SDK
-- HarmonyOS Native SDK
-- ARM64 HarmonyOS NEXT device
+| Tool | Version |
+|------|---------|
+| DevEco Studio | 5.0+ |
+| HarmonyOS NEXT SDK | latest |
+| Target device | ARM64 HarmonyOS NEXT |
+| Rust *(optional)* | stable, with `aarch64-unknown-linux-ohos` target |
 
-The repository includes split native-core static library parts used by DevEco builds:
+### Build with prebuilt native core
 
-```text
-clash/src/main/cpp/native-core/libclashhm_native_core.a.part00
-clash/src/main/cpp/native-core/libclashhm_native_core.a.part01
-...
-clash/src/main/cpp/native-core/native_core.h
+The repo includes split `.a` parts under `clash/src/main/cpp/native-core/`. CMake reassembles them automatically — no Rust toolchain needed.
+
+```bash
+# Just open in DevEco Studio → Sync → Build HAP → Run on device
 ```
 
-`clash/src/main/cpp/CMakeLists.txt` reconstructs `libclashhm_native_core.a` from the parts when the full archive is missing. This lets DevEco build the HAP without requiring Rust/Cargo on the DevEco machine and avoids GitHub's single-file size limit. If you want to rebuild the native core yourself, install Rust and run:
+### Rebuild native core from source
 
 ```bash
 export OHOS_NATIVE_HOME=/path/to/openharmony/native
 bash native-core/build-ohos.sh
 ```
 
-Then build the app in DevEco Studio:
-
-1. Open the repository root in DevEco Studio.
-2. Sync project dependencies.
-3. Build HAP.
-4. Install and run on a real device.
-
-Native-core release artifacts can be packaged or installed with:
-
-```bash
-bash scripts/verify-native-core-artifact.sh
-bash scripts/package-native-core-artifact.sh
-bash scripts/install-native-core-artifact.sh /path/to/clashhm-native-core-ohos-arm64-*.tar.gz
-```
-
-## Project Layout
-
-```text
-ClashHM/
-├── AppScope/                       # App-level HarmonyOS config
-├── clash/src/main/
-│   ├── ets/                        # ArkTS app, pages, services, VPN ability
-│   ├── cpp/                        # NAPI bridge and native build config
-│   └── resources/                  # strings, colors, icons, raw resources
-├── native-core/                    # Rust native core and Clash adapter
-└── docs/                           # Architecture and implementation notes
-```
-
-Important modules:
-
-- `clash/src/main/ets/pages` - Home, Proxy, Subscribe, Settings, and Log pages
-- `clash/src/main/ets/services` - subscription, config, native-core, and selection services
-- `clash/src/main/ets/vpnability` - `VpnExtensionAbility` entry point
-- `clash/src/main/cpp` - C++ NAPI bridge
-- `native-core` - Rust FFI, Clash config adapter, and embedded backend integration
-
-## Protocol Roadmap
-
-The remaining protocol work is not just a parser task. ClashHM already parses many Clash subscription shapes, but a protocol is only considered supported when the Extension native core can actually route traffic through it.
-
-Estimated work:
-
-- Hysteria2: TCP outbound, HTTP/3 auth, `password`/`auth`/`auth-str` credential aliases, first-hop UDP datagrams, and UDP fragmentation/reassembly have initial support through the embedded backend. Remaining work is HY2 obfs compatibility and real-device validation across subscriptions.
-- TUIC: TUIC v5 TCP outbound, QUIC auth, `password`/`token` credential aliases, first-hop UDP datagrams, and UDP fragmentation/reassembly have initial support through the embedded backend. Remaining work is non-default congestion option compatibility and real-device validation across subscriptions.
-- gRPC transport: initial backend support exists through a real gRPC-over-HTTP/2 transport wrapper with `grpc-opts.serviceName`. It still needs more real-device coverage across subscription variants.
-- Clash/Xray `network: h2`: initial backend support exists through a real HTTP/2 transport wrapper. It is not mapped to h2mux; it still needs more real-device coverage across subscription variants.
-
-Practical options:
-
-- Harden the embedded HY2/TUIC relay behavior against more real subscription variants.
-- Keep the current strict adapter and add protocol support one backend capability at a time.
-- Avoid claiming compatibility for unsupported protocols until real traffic tests pass on device.
-
-Detailed backend planning is tracked in [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md).
-
-## Development Notes
-
-ClashHM favors explicit failures over silent fallback. This is especially important for VPN software: a connection that appears successful but routes incorrectly is worse than a clear unsupported-protocol error.
-
-Useful checks:
+### Run tests
 
 ```bash
 cargo test --manifest-path native-core/Cargo.toml --features shoes-backend
 ```
 
-For HarmonyOS device validation, build and run from DevEco Studio, then test:
+## Project Layout
 
-- subscription import
-- proxy list display before connecting
-- node selection persistence
-- VPN connection
-- Google or other target access
-- node switching
-- traffic counters
-- disconnect and reconnect
+```
+ClashHM/
+├── clash/src/main/
+│   ├── ets/pages/          # Home, Proxy, Subscribe, Settings, Log
+│   ├── ets/services/       # Subscription, config, native-core bridge
+│   ├── ets/vpnability/     # VpnExtensionAbility entry point
+│   ├── cpp/                # C++ NAPI bridge
+│   └── resources/          # i18n strings, icons, raw assets
+├── native-core/            # Rust FFI + Clash config adapter
+│   └── vendor/shoes/       # Embedded proxy engine
+└── docs/                   # Architecture notes & roadmap
+```
 
-The full release checklist is in [docs/release-checklist.md](docs/release-checklist.md).
+## Roadmap
+
+Priority order: routing reliability > protocol coverage > polish.
+
+1. Improve rule-provider compatibility and matcher coverage
+2. Expand subscription format support (mihomo / sing-box references)
+3. Broaden HY2 / TUIC / gRPC / H2 real-device validation
+4. Release packaging and user-facing diagnostics
+
+See [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md) for the full protocol matrix.
 
 ## References
 
-- [mihomo](https://github.com/MetaCubeX/mihomo)
-- [Clash](https://github.com/Dreamacro/clash)
-- [sing-box](https://github.com/SagerNet/sing-box)
-- [Hiddify](https://github.com/hiddify/hiddify-app)
+- [mihomo](https://github.com/MetaCubeX/mihomo) · [Clash](https://github.com/Dreamacro/clash) · [sing-box](https://github.com/SagerNet/sing-box) · [Hiddify](https://github.com/hiddify/hiddify-app)
 
 ## License
 
