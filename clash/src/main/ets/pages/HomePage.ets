@@ -140,6 +140,7 @@ export struct HomePage {
         const vpnStatusPath = `${context.filesDir}/vpn-engine-status.txt`;
         const vpnStartConfigPath = `${context.filesDir}/vpn-start-config.txt`;
         await this.stopVpnExtension(context);
+        await this.delay(300);
 
         const nativeCoreConfig = await this.generateNativeCoreConfig(context, activeSub.filePath);
         if (!nativeCoreConfig) {
@@ -184,18 +185,21 @@ export struct HomePage {
           };
           await vpnExtension.startVpnExtensionAbility(want);
           this.writeConnectionStatus(vpnStatusPath, 'ui startVpnExtensionAbility returned');
-          await this.waitForVpnStatus(vpnStatusMessages, 'config subscriber ready', 5000);
+          const configSubscriberReady = await this.waitForVpnStatusOrFile(vpnStatusMessages, vpnStatusPath, 'config subscriber ready', 2000);
           for (let i = 0; i < coreChunkCount; i++) {
             const chunk = nativeCoreConfig.substring(i * chunkSize, Math.min(nativeCoreConfig.length, (i + 1) * chunkSize));
-            await this.publishConfigChunk(context.abilityInfo.bundleName, configSession, i, coreChunkCount, chunk, 'core');
-            this.writeConnectionStatus(vpnStatusPath, `ui core config chunk published ${i + 1}/${coreChunkCount}`);
+            if (configSubscriberReady) {
+              await this.publishConfigChunk(context.abilityInfo.bundleName, configSession, i, coreChunkCount, chunk, 'core');
+              this.writeConnectionStatus(vpnStatusPath, `ui core config chunk published ${i + 1}/${coreChunkCount}`);
+            } else {
+              await this.sendConfigChunkByWant(context, activeSub.filePath, vpnStatusPath, vpnStatusEvent, vpnStartConfigPath, configSession, i, coreChunkCount, chunk);
+              this.writeConnectionStatus(vpnStatusPath, `ui core config chunk sent by request ${i + 1}/${coreChunkCount}`);
+            }
           }
           Logger.info('VPN Extension started and config chunks published');
           this.writeConnectionStatus(vpnStatusPath, 'ui native-core config chunks published');
-          await this.waitForVpnStartResult(vpnStatusMessages, 15000);
-          if (this.hasNativeCoreStarted(vpnStatusMessages)) {
-            await this.applySavedProxySelectionsToExtension(context);
-          }
+          await this.waitForVpnStartResult(vpnStatusMessages, vpnStatusPath, context, 15000);
+          await this.applySavedProxySelectionsToExtension(context);
         } catch (e) {
           const startError = this.describeError(e);
           this.writeConnectionStatus(vpnStatusPath, `ui startVpnExtensionAbility failed: ${startError}`);
@@ -495,28 +499,63 @@ export struct HomePage {
     });
   }
 
+  private async sendConfigChunkByWant(
+    context: common.UIAbilityContext,
+    configPath: string,
+    statusPath: string,
+    statusEvent: string,
+    startConfigPath: string,
+    configSession: string,
+    index: number,
+    count: number,
+    data: string
+  ): Promise<void> {
+    const want: Want = {
+      deviceId: '',
+      bundleName: context.abilityInfo.bundleName,
+      moduleName: 'clash',
+      abilityName: 'ClashVpnAbility',
+      parameters: {
+        configPath,
+        statusPath,
+        statusEvent,
+        startConfigPath,
+        configSession,
+        configChunkIndex: index,
+        configChunkData: data,
+        coreConfigChunkCount: count,
+      },
+    };
+    await vpnExtension.startVpnExtensionAbility(want);
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
   }
 
-  private async waitForVpnStatus(messages: string[], expected: string, timeoutMs: number): Promise<void> {
+  private async waitForVpnStatusOrFile(messages: string[], statusPath: string, expected: string, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       for (const message of messages) {
         if (message.indexOf(expected) >= 0) {
-          return;
+          return true;
         }
+      }
+      const statusText = statusPath ? this.readTextFile(statusPath) : '';
+      if (statusText.indexOf(expected) >= 0) {
+        return true;
       }
       await this.delay(100);
     }
-    const recent = messages.length > 0 ? messages.slice(Math.max(0, messages.length - 30)).join('\n') : 'no vpn status events received';
-    throw new Error(`VPN Extension did not report "${expected}" within ${timeoutMs}ms; recentVpnStatus=\n${recent}`);
+    return false;
   }
 
-  private async waitForVpnStartResult(messages: string[], timeoutMs: number): Promise<void> {
+  private async waitForVpnStartResult(messages: string[], statusPath: string, context: common.UIAbilityContext, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    const extensionService = new NativeCoreExtensionService(context);
+    let lastProbeError = '';
     while (Date.now() < deadline) {
       for (const message of messages) {
         const resultIndex = message.indexOf('start result:');
@@ -531,19 +570,36 @@ export struct HomePage {
         }
         throw new Error(result);
       }
+      const statusText = statusPath ? this.readTextFile(statusPath) : '';
+      const fileResultIndex = statusText.indexOf('start result:');
+      if (fileResultIndex >= 0) {
+        const result = statusText.substring(fileResultIndex).trim();
+        if (result.indexOf('start result: started') >= 0 ||
+          result.indexOf('start result: already_running') >= 0 ||
+          result.indexOf('start result: native_core_started') >= 0) {
+          return;
+        }
+        throw new Error(result);
+      }
+      try {
+        const statusResult = await extensionService.getStatus();
+        if (statusResult.ok && statusResult.data.indexOf('"running":true') >= 0) {
+          this.writeConnectionStatus(statusPath, `ui native-core status probe running ${statusResult.data}`);
+          return;
+        }
+        if (statusResult.data) {
+          lastProbeError = statusResult.data;
+        }
+      } catch (e) {
+        lastProbeError = this.describeError(e);
+      }
       await this.delay(100);
     }
     const recent = messages.length > 0 ? messages.slice(Math.max(0, messages.length - 30)).join('\n') : 'no vpn status events received';
-    throw new Error(`VPN Extension did not report start result within ${timeoutMs}ms; recentVpnStatus=\n${recent}`);
-  }
-
-  private hasNativeCoreStarted(messages: string[]): boolean {
-    for (const message of messages) {
-      if (message.indexOf('start result: native_core_started') >= 0) {
-        return true;
-      }
-    }
-    return false;
+    const statusText = statusPath ? this.readTextFile(statusPath) : '';
+    const recentStatus = statusText || recent;
+    const probe = lastProbeError ? `\nstatusProbe=${lastProbeError}` : '';
+    throw new Error(`VPN Extension did not report start result within ${timeoutMs}ms; recentVpnStatus=\n${recentStatus}${probe}`);
   }
 
   private describeError(error: Object | string): string {

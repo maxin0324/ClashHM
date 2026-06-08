@@ -43,6 +43,16 @@ export struct SubscriptionPage {
     });
   }
 
+  private getProfilesCountText(): string {
+    return `${this.subscriptions.length} 个配置`;
+  }
+
+  private getSubscriptionKey(sub: SubscriptionCardModel): string {
+    const id = sub.id || sub.name || sub.url || 'subscription';
+    const lastUpdate = sub.lastUpdate || 0;
+    return `${id}_${lastUpdate}`;
+  }
+
   private showAddSubscriptionDialog(isEdit: boolean = false): void {
     if (!isEdit) {
       this.dialogName = '';
@@ -133,7 +143,7 @@ export struct SubscriptionPage {
               .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
-            Text($r('app.string.profiles_count', this.subscriptions.length))
+            Text(this.getProfilesCountText())
               .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
           }
@@ -200,7 +210,15 @@ export struct SubscriptionPage {
             ForEach(this.subscriptions, (sub: SubscriptionCardModel) => {
               ListItem() {
                 SubscriptionCard({
-                  sub: sub,
+                  name: sub.name,
+                  url: sub.url,
+                  nodeCount: sub.nodeCount,
+                  lastUpdate: sub.lastUpdate,
+                  expireDate: sub.expireDate,
+                  uploadUsed: sub.uploadUsed,
+                  downloadUsed: sub.downloadUsed,
+                  totalData: sub.totalData,
+                  isActive: sub.isActive,
                   onTap: () => {
                     this.setActive(sub.id);
                   },
@@ -218,7 +236,7 @@ export struct SubscriptionPage {
                   }
                 })
               }
-            }, (sub: SubscriptionCardModel) => sub.id + '_' + sub.lastUpdate.toString())
+            }, (sub: SubscriptionCardModel) => this.getSubscriptionKey(sub))
           }
           .width('100%')
           .layoutWeight(1)

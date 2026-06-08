@@ -1,23 +1,13 @@
-# Define project specific obfuscation rules here.
-# You can include the obfuscation configuration files in the current module's build-profile.json5.
+# Release builds must keep ArkTS symbol names stable.
 #
-# For more details, see
-#   https://gitee.com/openharmony/arkcompiler_ets_frontend/blob/master/arkguard/README.md
-
-# Obfuscation options:
-# -disable-obfuscation: disable all obfuscations
-# -enable-property-obfuscation: obfuscate the property names
-# -enable-toplevel-obfuscation: obfuscate the names in the global scope
-# -compact: remove unnecessary blank spaces and all line feeds
-# -remove-log: remove all console.* statements
-# -print-namecache: print the name cache that contains the mapping from the old names to new names
-# -apply-namecache: reuse the given cache file
-
-# Keep options:
-# -keep-property-name: specifies property names that you want to keep
-# -keep-global-name: specifies names that you want to keep in the global scope
-
--enable-property-obfuscation
--enable-toplevel-obfuscation
--enable-filename-obfuscation
--enable-export-obfuscation
+# ClashHM relies on framework and IPC string contracts:
+# - module.json5 srcEntry entries for UIAbility and VpnExtensionAbility
+# - Want parameter names passed between the app and VPN Extension
+# - CommonEvent parameter names for config chunks and native-core commands
+# - NAPI export names and JSON fields exchanged with the native core
+#
+# ArkGuard property/toplevel/filename/export obfuscation can rename those
+# contracts and make release builds fail while debug builds still work. Keep
+# obfuscation disabled unless every affected contract is covered by explicit
+# keep rules and verified on a real device.
+-disable-obfuscation

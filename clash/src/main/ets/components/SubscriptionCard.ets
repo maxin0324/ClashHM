@@ -2,18 +2,30 @@ import { Subscription, formatBytes, formatTimestamp } from '../models/Subscripti
 
 @Component
 export struct SubscriptionCard {
-  @Prop sub: SubscriptionCardModel = new SubscriptionCardModel();
+  @Prop name: string = '';
+  @Prop url: string = '';
+  @Prop nodeCount: number = 0;
+  @Prop lastUpdate: number = 0;
+  @Prop expireDate: number = 0;
+  @Prop uploadUsed: number = 0;
+  @Prop downloadUsed: number = 0;
+  @Prop totalData: number = 0;
+  @Prop isActive: boolean = false;
   onTap: () => void = () => {};
   onUpdate: () => void = () => {};
   onEdit: () => void = () => {};
   onDelete: () => void = () => {};
 
   private getUsagePercent(): number {
-    if (this.sub.totalData <= 0) {
+    if (this.totalData <= 0) {
       return 0;
     }
-    const used = this.sub.uploadUsed + this.sub.downloadUsed;
-    return Math.min(used / this.sub.totalData * 100, 100);
+    const used = this.uploadUsed + this.downloadUsed;
+    return Math.min(used / this.totalData * 100, 100);
+  }
+
+  private getNodesCountText(): string {
+    return `${this.nodeCount} 个节点`;
   }
 
   build() {
@@ -21,7 +33,7 @@ export struct SubscriptionCard {
       Row() {
         Column({ space: 4 }) {
           Row({ space: 8 }) {
-            Text(this.sub.name)
+            Text(this.name)
               .fontSize(16)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
@@ -29,7 +41,7 @@ export struct SubscriptionCard {
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
 
-            if (this.sub.isActive) {
+            if (this.isActive) {
               Text($r('app.string.active'))
                 .fontSize(10)
                 .fontColor(Color.White)
@@ -40,7 +52,7 @@ export struct SubscriptionCard {
           }
           .width('100%')
 
-          Text(this.sub.url)
+          Text(this.url)
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
             .maxLines(1)
@@ -51,7 +63,7 @@ export struct SubscriptionCard {
       .width('100%')
 
       Row() {
-        Text($r('app.string.nodes_count', this.sub.nodeCount))
+        Text(this.getNodesCountText())
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
 
@@ -60,23 +72,23 @@ export struct SubscriptionCard {
           .fontColor($r('app.color.text_secondary'))
           .margin({ left: 8, right: 8 })
 
-        Text(formatTimestamp(this.sub.lastUpdate))
+        Text(formatTimestamp(this.lastUpdate))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
 
-        if (this.sub.expireDate > 0) {
+        if (this.expireDate > 0) {
           Text('·')
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
             .margin({ left: 8, right: 8 })
-          Text(`Exp: ${formatTimestamp(this.sub.expireDate)}`)
+          Text(`Exp: ${formatTimestamp(this.expireDate)}`)
             .fontSize(12)
-            .fontColor(this.sub.expireDate < Date.now() ? $r('app.color.error_color') : $r('app.color.text_secondary'))
+            .fontColor(this.expireDate < Date.now() ? $r('app.color.error_color') : $r('app.color.text_secondary'))
         }
       }
       .width('100%')
 
-      if (this.sub.totalData > 0) {
+      if (this.totalData > 0) {
         Column({ space: 4 }) {
           Progress({ value: this.getUsagePercent(), total: 100, type: ProgressType.Linear })
             .width('100%')
@@ -86,7 +98,7 @@ export struct SubscriptionCard {
             .borderRadius(2)
 
           Row() {
-            Text(`${formatBytes(this.sub.uploadUsed + this.sub.downloadUsed)} / ${formatBytes(this.sub.totalData)}`)
+            Text(`${formatBytes(this.uploadUsed + this.downloadUsed)} / ${formatBytes(this.totalData)}`)
               .fontSize(11)
               .fontColor($r('app.color.text_secondary'))
             Blank()
@@ -137,7 +149,7 @@ export struct SubscriptionCard {
     .padding(16)
     .backgroundColor($r('app.color.card_bg'))
     .borderRadius(8)
-    .border({ width: 1, color: this.sub.isActive ? $r('app.color.primary') : $r('app.color.divider') })
+    .border({ width: 1, color: this.isActive ? $r('app.color.primary') : $r('app.color.divider') })
     .onClick(() => this.onTap())
   }
 }
@@ -156,16 +168,16 @@ export class SubscriptionCardModel {
 
   static fromSubscription(sub: Subscription): SubscriptionCardModel {
     const model = new SubscriptionCardModel();
-    model.id = sub.id;
-    model.name = sub.name;
-    model.url = sub.url;
-    model.nodeCount = sub.nodeCount;
-    model.lastUpdate = sub.lastUpdate;
-    model.expireDate = sub.expireDate;
-    model.uploadUsed = sub.uploadUsed;
-    model.downloadUsed = sub.downloadUsed;
-    model.totalData = sub.totalData;
-    model.isActive = sub.isActive;
+    model.id = sub.id || '';
+    model.name = sub.name || '';
+    model.url = sub.url || '';
+    model.nodeCount = sub.nodeCount || 0;
+    model.lastUpdate = sub.lastUpdate || 0;
+    model.expireDate = sub.expireDate || 0;
+    model.uploadUsed = sub.uploadUsed || 0;
+    model.downloadUsed = sub.downloadUsed || 0;
+    model.totalData = sub.totalData || 0;
+    model.isActive = sub.isActive === true;
     return model;
   }
 }

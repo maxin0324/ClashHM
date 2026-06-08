@@ -27,10 +27,29 @@
   ],
   "targets": [
     {
-      "name": "default"
+      "name": "default",
+      "config": {
+        "deviceType": [
+          "phone",
+          "tablet",
+          "2in1"
+        ]
+      },
+      "runtimeOS": "HarmonyOS"
     },
     {
       "name": "ohosTest"
+    }
+  ],
+  "buildModeBinder": [
+    {
+      "buildModeName": "release",
+      "mappings": [
+        {
+          "targetName": "default",
+          "buildOptionName": "release"
+        }
+      ]
     }
   ]
 }
