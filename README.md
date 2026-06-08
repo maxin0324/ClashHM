@@ -1,30 +1,65 @@
-# ClashHM
+<div align="center">
 
-A Clash-compatible proxy client for **HarmonyOS NEXT**, with an embedded Rust native core running inside the system VPN Extension.
+# 🛡️ ClashHM
 
-Unlike desktop Clash wrappers, ClashHM runs the entire VPN data path in `VpnExtensionAbility` — no foreground process required to keep the tunnel alive.
+**Clash-compatible proxy client for HarmonyOS NEXT**
 
-## Features
+Embedded Rust native core · System VPN Extension · No foreground process needed
 
-- **Native HarmonyOS UI** — ArkTS / ArkUI, light & dark themes, Chinese & English
-- **System VPN integration** — traffic handled by `VpnExtensionAbility`, not the app process
-- **Embedded native core** — Rust proxy engine compiled as a static library, no external binaries
-- **Clash subscription import** — YAML configs and `ss://` `vmess://` `vless://` `trojan://` `hysteria2://` share links
-- **Proxy management** — groups, node selection, Rule / Global / Direct modes
-- **Latency testing** — proxy-chain probe works both before and after VPN connects
-- **Traffic monitoring** — real-time upload/download counters and active connections
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-HarmonyOS%20NEXT-brightgreen.svg)]()
+[![Rust](https://img.shields.io/badge/Core-Rust-orange.svg)]()
+[![ArkTS](https://img.shields.io/badge/UI-ArkTS-blue.svg)]()
 
-## Supported Protocols
+</div>
 
-| Category | Protocols |
-|----------|-----------|
-| **Proxy** | Shadowsocks, VMess, VLESS, Trojan, Hysteria2, TUIC v5, Snell, AnyTLS, NaiveProxy, SOCKS5, HTTP/S, Direct |
-| **Transport** | TLS, WebSocket, HTTP/2, gRPC, Reality, ShadowTLS, v2ray-plugin WS |
-| **Multiplex** | `mux` / `h2mux` for VMess, VLESS, Trojan |
-| **Rules** | DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, IP-CIDR/6, DST-PORT, GEOIP (MMDB), GEOSITE (dat), RULE-SET, MATCH |
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%">
+
+🖥️ **Native HarmonyOS UI**
+> ArkTS / ArkUI with light & dark themes, Chinese & English
+
+📡 **System VPN Integration**
+> Traffic runs in `VpnExtensionAbility`, not the app process
+
+⚙️ **Embedded Native Core**
+> Rust proxy engine as static library, zero external binaries
+
+</td>
+<td width="50%">
+
+📋 **Subscription Import**
+> Clash YAML + `ss://` `vmess://` `vless://` `trojan://` `hy2://` share links
+
+🔀 **Proxy Management**
+> Groups, node selection, Rule / Global / Direct modes
+
+📊 **Real-time Monitoring**
+> Traffic stats, latency testing, active connections
+
+</td>
+</tr>
+</table>
+
+---
+
+## 📦 Supported Protocols
+
+| | Supported |
+|:--|:--|
+| **🔌 Proxy** | Shadowsocks · VMess · VLESS · Trojan · Hysteria2 · TUIC v5 · Snell · AnyTLS · NaiveProxy · SOCKS5 · HTTP/S |
+| **🔗 Transport** | TLS · WebSocket · HTTP/2 · gRPC · Reality · ShadowTLS · v2ray-plugin WS |
+| **📐 Multiplex** | `mux` / `h2mux` for VMess, VLESS, Trojan |
+| **📏 Rules** | DOMAIN · DOMAIN-SUFFIX · DOMAIN-KEYWORD · IP-CIDR/6 · DST-PORT · GEOIP · GEOSITE · RULE-SET · MATCH |
 
 <details>
-<summary>Known limitations</summary>
+<summary>⚠️ Known limitations</summary>
+<br>
 
 - HY2 obfs and non-default TUIC congestion options not yet implemented
 - Remote-only `RULE-SET` providers that cannot be materialized locally
@@ -33,55 +68,59 @@ Unlike desktop Clash wrappers, ClashHM runs the entire VPN data path in `VpnExte
 
 </details>
 
-## Architecture
+---
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────┐
-│  ArkUI App Process          │
-│  ┌────────────────────────┐ │
-│  │ Subscription管理       │ │
-│  │ Proxy选择 & 延迟测试    │ │
-│  │ 流量统计 & 日志         │ │
-│  └──────────┬─────────────┘ │
-└─────────────┼───────────────┘
-              │ CommonEvent IPC
-┌─────────────▼───────────────┐
-│  VpnExtensionAbility        │
-│  ┌────────────────────────┐ │
-│  │ System TUN fd          │ │
-│  │ Embedded native core   │ │
-│  │ DNS → TCP-over-proxy   │ │
-│  │ Rule routing engine    │ │
-│  └────────────────────────┘ │
-└─────────────────────────────┘
+  ┌──────────────────────────────────┐
+  │        ArkUI App Process         │
+  │                                  │
+  │   Subscriptions · Proxy Select   │
+  │   Latency Test · Traffic Stats   │
+  └───────────────┬──────────────────┘
+                  │ CommonEvent IPC
+  ┌───────────────▼──────────────────┐
+  │      VpnExtensionAbility         │
+  │                                  │
+  │   TUN fd · Native Core · DNS     │
+  │   Rule Engine · Protocol Client  │
+  └──────────────────────────────────┘
 ```
 
-See [docs/extension-native-core.md](docs/extension-native-core.md) for details.
+> 📖 See [docs/extension-native-core.md](docs/extension-native-core.md) for details.
 
-## Quick Start
+---
 
-1. **Add subscription** — paste a Clash YAML URL or share links on the Subscribe page
-2. **Select a node** — pick a proxy from the Proxy page
-3. **Connect** — tap the connect button on Home, approve the VPN permission
-4. **Done** — switch nodes, check latency, view traffic stats anytime
+## 🚀 Quick Start
 
-## Build
+| Step | Action |
+|:----:|--------|
+| **1** | **Add subscription** — paste a Clash YAML URL or share links |
+| **2** | **Select a node** — pick a proxy from the Proxy page |
+| **3** | **Connect** — tap the connect button, approve VPN permission |
+| **4** | **Done** — switch nodes, check latency, view stats anytime |
+
+---
+
+## 🔨 Build
 
 ### Prerequisites
 
 | Tool | Version |
-|------|---------|
+|:-----|:--------|
 | DevEco Studio | 5.0+ |
 | HarmonyOS NEXT SDK | latest |
 | Target device | ARM64 HarmonyOS NEXT |
 | Rust *(optional)* | stable, with `aarch64-unknown-linux-ohos` target |
 
-### Build with prebuilt native core
+### With prebuilt native core
 
-The repo includes split `.a` parts under `clash/src/main/cpp/native-core/`. CMake reassembles them automatically — no Rust toolchain needed.
+The repo includes split `.a` parts under `clash/src/main/cpp/native-core/`.
+CMake reassembles them automatically — **no Rust toolchain needed**.
 
 ```bash
-# Just open in DevEco Studio → Sync → Build HAP → Run on device
+# Open in DevEco Studio → Sync → Build HAP → Run on device
 ```
 
 ### Rebuild native core from source
@@ -97,7 +136,9 @@ bash native-core/build-ohos.sh
 cargo test --manifest-path native-core/Cargo.toml --features shoes-backend
 ```
 
-## Project Layout
+---
+
+## 📁 Project Layout
 
 ```
 ClashHM/
@@ -112,21 +153,25 @@ ClashHM/
 └── docs/                   # Architecture notes & roadmap
 ```
 
-## Roadmap
+---
 
-Priority order: routing reliability > protocol coverage > polish.
+## 🗺️ Roadmap
+
+> **Priority:** routing reliability → protocol coverage → polish
 
 1. Improve rule-provider compatibility and matcher coverage
 2. Expand subscription format support (mihomo / sing-box references)
 3. Broaden HY2 / TUIC / gRPC / H2 real-device validation
 4. Release packaging and user-facing diagnostics
 
-See [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md) for the full protocol matrix.
+> 📖 See [docs/protocol-backend-roadmap.md](docs/protocol-backend-roadmap.md) for the full protocol matrix.
 
-## References
+---
 
-- [mihomo](https://github.com/MetaCubeX/mihomo) · [Clash](https://github.com/Dreamacro/clash) · [sing-box](https://github.com/SagerNet/sing-box) · [Hiddify](https://github.com/hiddify/hiddify-app)
+## 🔗 References
 
-## License
+[mihomo](https://github.com/MetaCubeX/mihomo) · [Clash](https://github.com/Dreamacro/clash) · [sing-box](https://github.com/SagerNet/sing-box) · [Hiddify](https://github.com/hiddify/hiddify-app)
 
-MIT
+## 📄 License
+
+[MIT](LICENSE)
