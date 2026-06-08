@@ -373,6 +373,7 @@ struct LogPage {
           ListItem() {
             LogItem({ entry: log })
           }
+          .padding({ left: 16, right: 16, bottom: 8 })
         }, (log: LogItemModel) => log.id)
       }
       .width('100%')

@@ -71,16 +71,20 @@ export struct LogItem {
         Text(this.formatTime(this.entry.timestamp))
           .fontSize(10)
           .fontColor($r('app.color.text_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
 
         Text(`↓${formatBytes(this.entry.downloadBytes)}`)
           .fontSize(10)
           .fontColor($r('app.color.text_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
+      .width(58)
       .alignItems(HorizontalAlign.End)
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .margin({ left: 16, right: 16, bottom: 8 })
     .backgroundColor($r('app.color.card_bg'))
     .borderRadius(8)
     .border({ width: 1, color: $r('app.color.divider') })
