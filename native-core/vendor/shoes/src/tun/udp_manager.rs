@@ -293,11 +293,15 @@ struct DestinationEntry {
     write_tx: mpsc::Sender<Vec<u8>>,
     /// Aborted on drop to terminate the destination task immediately
     handle: tokio::task::JoinHandle<()>,
+    /// Native connection tracker id. Finishing is idempotent, so Drop is safe
+    /// even if the task already closed the record normally.
+    conn_id: u64,
 }
 
 impl Drop for DestinationEntry {
     fn drop(&mut self) {
         self.handle.abort();
+        super::finish_connection(self.conn_id);
     }
 }
 
@@ -414,13 +418,40 @@ async fn session_task(
 
                 // Create destination task if absent
                 if !destinations.contains_key(&dest) {
+                    let (host, dest_ip) = super::extract_host_ip(&dest);
+                    let conn_id = super::register_connection_with_metadata(
+                        "udp",
+                        &host,
+                        &dest_ip,
+                        dest.port(),
+                        &peer_addr.ip().to_string(),
+                        peer_addr.port(),
+                        "MATCH",
+                        &dest.to_string(),
+                        Vec::new(),
+                    );
                     match create_connection(&dest, &proxy_selector, &resolver).await {
-                        Ok(stream) => {
+                        Ok((stream, proxy_chain)) => {
                             let source_addr = match dest.to_socket_addr_nonblocking() {
                                 Some(addr) => addr,
-                                None => continue,
+                                None => {
+                                    super::set_connection_metadata(
+                                        conn_id,
+                                        "CONNECT_ERROR",
+                                        "destination is not a socket address",
+                                        proxy_chain,
+                                    );
+                                    super::finish_connection(conn_id);
+                                    continue;
+                                }
                             };
 
+                            super::set_connection_metadata(
+                                conn_id,
+                                "MATCH",
+                                &dest.to_string(),
+                                proxy_chain,
+                            );
                             let (write_tx, write_rx) = mpsc::channel(CHANNEL_SIZE);
                             let handle = tokio::spawn(destination_task(
                                 peer_addr,
@@ -428,19 +459,27 @@ async fn session_task(
                                 stream,
                                 write_rx,
                                 response_tx.clone(),
+                                conn_id,
                             ));
 
                             debug!(
                                 "[TunUdpSession {}] Created destination task for {}",
                                 peer_addr, dest
                             );
-                            destinations.insert(dest.clone(), DestinationEntry { write_tx, handle });
+                            destinations.insert(dest.clone(), DestinationEntry { write_tx, handle, conn_id });
                         }
                         Err(e) => {
                             debug!(
                                 "[TunUdpSession {}] Failed to connect to {}: {}",
                                 peer_addr, dest, e
                             );
+                            super::set_connection_metadata(
+                                conn_id,
+                                "CONNECT_ERROR",
+                                &e.to_string(),
+                                Vec::new(),
+                            );
+                            super::finish_connection(conn_id);
                             continue;
                         }
                     }
@@ -499,10 +538,13 @@ async fn destination_task(
     mut stream: Box<dyn AsyncMessageStream>,
     mut write_rx: mpsc::Receiver<Vec<u8>>,
     response_tx: mpsc::Sender<UdpMessage>,
+    conn_id: u64,
 ) {
     let mut read_buf = vec![0u8; 65535];
     let sleep = tokio::time::sleep(CONNECTION_TIMEOUT);
     tokio::pin!(sleep);
+    let mut upload: u64 = 0;
+    let mut download: u64 = 0;
 
     loop {
         let mut buf = ReadBuf::new(&mut read_buf);
@@ -530,6 +572,8 @@ async fn destination_task(
                     break;
                 }
                 sleep.as_mut().reset(Instant::now() + CONNECTION_TIMEOUT);
+                download += len as u64;
+                super::add_connection_bytes(conn_id, 0, len as u64);
 
                 debug!(
                     "[TunUdpSession {}] Response from {}: {} bytes",
@@ -556,6 +600,8 @@ async fn destination_task(
             }
             Action::Write(Some(payload)) => {
                 sleep.as_mut().reset(Instant::now() + CONNECTION_TIMEOUT);
+                upload += payload.len() as u64;
+                super::add_connection_bytes(conn_id, payload.len() as u64, 0);
 
                 match tokio::time::timeout(WRITE_TIMEOUT, send_message(&mut stream, &payload)).await
                 {
@@ -586,6 +632,8 @@ async fn destination_task(
             }
         }
     }
+    let _ = (upload, download);
+    super::finish_connection(conn_id);
 }
 
 /// Create a connection to a destination through the proxy chain.
@@ -593,7 +641,7 @@ async fn create_connection(
     dest: &NetLocation,
     proxy_selector: &Arc<ClientProxySelector>,
     resolver: &Arc<dyn Resolver>,
-) -> io::Result<Box<dyn AsyncMessageStream>> {
+) -> io::Result<(Box<dyn AsyncMessageStream>, Vec<String>)> {
     let decision = proxy_selector.judge(dest.into(), resolver).await?;
 
     match decision {
@@ -601,10 +649,11 @@ async fn create_connection(
             chain_group,
             remote_location,
         } => {
+            let proxy_chain = chain_group.describe_for_log();
             let stream = chain_group
                 .connect_udp_bidirectional(resolver, remote_location)
                 .await?;
-            Ok(stream)
+            Ok((stream, proxy_chain))
         }
         ConnectDecision::Block => Err(io::Error::new(
             io::ErrorKind::PermissionDenied,

@@ -2999,6 +2999,7 @@ async fn build_clash_dns_resolvers(
 fn start_shoes_backend(shoes_yaml: String, dns_config: ClashDnsConfig) -> Result<(), String> {
     stop_shoes_backend();
     shoes::tun::reset_traffic_snapshot();
+    shoes::tun::reset_connections();
     let configs = shoes::config::load_config_str(&shoes_yaml).map_err(|e| e.to_string())?;
     let mut tun_config = None;
     for config in configs {
@@ -3109,6 +3110,7 @@ fn tcp_delay_ms(proxy: &ProxyNode, timeout_ms: i32) -> Result<i32, i32> {
     Ok(start.elapsed().as_millis().min(i32::MAX as u128) as i32)
 }
 
+#[cfg(any(feature = "shoes-backend", test))]
 struct DelayUrlTarget {
     scheme: String,
     host: String,
@@ -3116,6 +3118,7 @@ struct DelayUrlTarget {
     path_and_query: String,
 }
 
+#[cfg(any(feature = "shoes-backend", test))]
 fn parse_delay_url_target(url: &str) -> Result<DelayUrlTarget, i32> {
     let normalized = if url.trim().is_empty() {
         "https://www.gstatic.com/generate_204"
@@ -3565,6 +3568,10 @@ pub extern "C" fn clashhm_native_core_get_traffic_json() -> *mut c_char {
     let (upload_total, download_total) = shoes::tun::traffic_snapshot();
     #[cfg(not(feature = "shoes-backend"))]
     let (upload_total, download_total) = (0u64, 0u64);
+    #[cfg(feature = "shoes-backend")]
+    let active_connections = shoes::tun::active_connection_count();
+    #[cfg(not(feature = "shoes-backend"))]
+    let active_connections = 0usize;
     let now = now_ms();
     let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
     let elapsed_ms = now.saturating_sub(guard.last_traffic_at_ms);
@@ -3585,8 +3592,8 @@ pub extern "C" fn clashhm_native_core_get_traffic_json() -> *mut c_char {
     guard.last_download_total = download_total;
     drop(guard);
     into_c_string(format!(
-        "{{\"uploadSpeed\":{},\"downloadSpeed\":{},\"uploadTotal\":{},\"downloadTotal\":{}}}",
-        upload_speed, download_speed, upload_total, download_total
+        "{{\"uploadSpeed\":{},\"downloadSpeed\":{},\"uploadTotal\":{},\"downloadTotal\":{},\"activeConnections\":{}}}",
+        upload_speed, download_speed, upload_total, download_total, active_connections
     ))
 }
 
@@ -3623,6 +3630,10 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
     let route_debug = shoes::tun::route_debug_json();
     #[cfg(not(feature = "shoes-backend"))]
     let route_debug = "{}".to_string();
+    #[cfg(feature = "shoes-backend")]
+    let connections = shoes::tun::connections_summary_json();
+    #[cfg(not(feature = "shoes-backend"))]
+    let connections = "{\"active\":0,\"closed\":0,\"sample\":null}".to_string();
     let uptime_ms = if running && guard.started_at_ms > 0 {
         now_ms().saturating_sub(guard.started_at_ms)
     } else {
@@ -3633,7 +3644,7 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         TlsClientMode::Rustls => "rustls",
     };
     into_c_string(format!(
-        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"routeDebug\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"tlsClientMode\":\"{}\",\"connectionMode\":\"{}\",\"parserVersion\":\"{}\"}}",
+        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"routeDebug\":{},\"connections\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"tlsClientMode\":\"{}\",\"connectionMode\":\"{}\",\"parserVersion\":\"{}\"}}",
         if running { "true" } else { "false" },
         json_escape(&guard.engine),
         guard.tun_fd,
@@ -3649,6 +3660,7 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         skipped_count,
         json_string_array(&skipped_types),
         route_debug,
+        connections,
         uptime_ms,
         guard.last_delay_ms,
         tls_client_mode,
@@ -3659,7 +3671,14 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn clashhm_native_core_get_connections_json() -> *mut c_char {
-    into_c_string("[]".to_string())
+    #[cfg(feature = "shoes-backend")]
+    {
+        return into_c_string(shoes::tun::connections_snapshot_json());
+    }
+    #[cfg(not(feature = "shoes-backend"))]
+    {
+        into_c_string("[]".to_string())
+    }
 }
 
 #[no_mangle]

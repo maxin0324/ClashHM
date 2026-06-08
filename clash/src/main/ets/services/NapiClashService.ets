@@ -12,6 +12,7 @@ interface NativeCoreTraffic {
   downloadSpeed: number;
   uploadTotal: number;
   downloadTotal: number;
+  activeConnections: number;
 }
 
 export class NapiClashService implements IClashService {
@@ -199,6 +200,7 @@ export class NapiClashService implements IClashService {
         downloadSpeed = 0;
       }
     }
+    let activeConnections = t.activeConnections >= 0 ? t.activeConnections : 0;
     this.prevUpload = t.uploadTotal;
     this.prevDownload = t.downloadTotal;
     return {
@@ -206,7 +208,7 @@ export class NapiClashService implements IClashService {
       downloadSpeed,
       sessionUpload: t.uploadTotal,
       sessionDownload: t.downloadTotal,
-      activeConnections: this.lastTraffic.activeConnections,
+      activeConnections,
     };
   }
 }

@@ -526,7 +526,11 @@ export struct HomePage {
         coreConfigChunkCount: count,
       },
     };
-    await vpnExtension.startVpnExtensionAbility(want);
+    try {
+      await vpnExtension.startVpnExtensionAbility(want);
+    } catch (e) {
+      throw new Error(`send core config chunk ${index + 1}/${count} failed: ${String(e)}`);
+    }
   }
 
   private delay(ms: number): Promise<void> {

@@ -8,6 +8,8 @@ const DOMAIN = 0x0001;
 const TAG = 'ClashHM';
 
 export default class ClashAbility extends UIAbility {
+  private cleanupStarted: boolean = false;
+
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
@@ -17,12 +19,21 @@ export default class ClashAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'ClashAbility onCreate');
   }
 
-  onDestroy(): void {
+  async onDestroy(): Promise<void> {
     hilog.info(DOMAIN, TAG, 'ClashAbility onDestroy');
+    await this.cleanupRuntime('destroy');
+  }
 
+  private async cleanupRuntime(reason: string): Promise<void> {
+    if (this.cleanupStarted) {
+      hilog.info(DOMAIN, TAG, 'ClashAbility cleanup skipped, reason=%{public}s', reason);
+      return;
+    }
+    this.cleanupStarted = true;
+    hilog.info(DOMAIN, TAG, 'ClashAbility cleanup started, reason=%{public}s', reason);
     try {
       const service = getClashService();
-      service.stop().catch((_e: Error) => {
+      await service.stop().catch((_e: Error) => {
         // service may already be stopped
       });
     } catch (_e) {
@@ -32,9 +43,10 @@ export default class ClashAbility extends UIAbility {
     try {
       const want: Want = {
         bundleName: this.context.abilityInfo.bundleName,
+        moduleName: 'clash',
         abilityName: 'ClashVpnAbility',
       };
-      vpnExtension.stopVpnExtensionAbility(want).catch((_e: Error) => {
+      await vpnExtension.stopVpnExtensionAbility(want).catch((_e: Error) => {
         // vpn may not be running
       });
     } catch (_e) {
@@ -54,8 +66,18 @@ export default class ClashAbility extends UIAbility {
     });
   }
 
+  onWindowStageWillDestroy(_windowStage: window.WindowStage): void {
+    hilog.info(DOMAIN, TAG, 'ClashAbility onWindowStageWillDestroy');
+    this.cleanupRuntime('windowStageWillDestroy').catch((_e: Error) => {
+      // cleanup may already be in progress
+    });
+  }
+
   onWindowStageDestroy(): void {
     hilog.info(DOMAIN, TAG, 'ClashAbility onWindowStageDestroy');
+    this.cleanupRuntime('windowStageDestroy').catch((_e: Error) => {
+      // cleanup may already be in progress
+    });
   }
 
   onForeground(): void {

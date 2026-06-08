@@ -71,6 +71,13 @@ impl InitialHopEntry {
             }
         }
     }
+
+    fn describe_for_log(&self) -> String {
+        match self {
+            InitialHopEntry::Direct(_) => "DIRECT".to_string(),
+            InitialHopEntry::Proxy { proxy, .. } => proxy.proxy_location().to_string(),
+        }
+    }
 }
 
 /// A chain of proxy hops with paired initial hop entries.
@@ -211,6 +218,36 @@ impl ClientProxyChain {
             InitialHopEntry::Direct(socket) => socket.bind_interface(),
             InitialHopEntry::Proxy { .. } => None,
         })
+    }
+
+    pub fn describe_for_log(&self) -> Vec<String> {
+        let mut hops = Vec::<String>::new();
+        if self.initial_hop.len() == 1 {
+            hops.push(self.initial_hop[0].describe_for_log());
+        } else {
+            let entries = self
+                .initial_hop
+                .iter()
+                .map(InitialHopEntry::describe_for_log)
+                .collect::<Vec<String>>()
+                .join("|");
+            hops.push(format!("pool({entries})"));
+        }
+
+        for hop in &self.subsequent_hops {
+            if hop.len() == 1 {
+                hops.push(hop[0].proxy_location().to_string());
+            } else {
+                let entries = hop
+                    .iter()
+                    .map(|proxy| proxy.proxy_location().to_string())
+                    .collect::<Vec<String>>()
+                    .join("|");
+                hops.push(format!("pool({entries})"));
+            }
+        }
+
+        hops
     }
 
     /// Select an initial hop entry (round-robin).
@@ -599,6 +636,20 @@ impl ClientChainGroup {
         self.chains
             .first()
             .and_then(|chain| chain.get_bind_interface())
+    }
+
+    pub fn describe_for_log(&self) -> Vec<String> {
+        if self.chains.len() == 1 {
+            return self.chains[0].describe_for_log();
+        }
+
+        let entries = self
+            .chains
+            .iter()
+            .map(|chain| chain.describe_for_log().join(" -> "))
+            .collect::<Vec<String>>()
+            .join(" || ");
+        vec![format!("group({entries})")]
     }
 }
 

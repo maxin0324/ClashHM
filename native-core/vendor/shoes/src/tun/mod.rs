@@ -47,13 +47,16 @@ pub use platform::{
 
 pub use tun_server::TunServerConfig;
 
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::os::unix::io::IntoRawFd;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::task::{Context, Poll};
 
 use log::{debug, info, warn};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -173,6 +176,304 @@ pub fn reset_traffic_snapshot() {
     DOWNLOAD_BYTES.store(0, Ordering::Relaxed);
 }
 
+// ---------------------------------------------------------------------------
+// Connection tracker
+// ---------------------------------------------------------------------------
+
+static CONNECTION_TRACKER: OnceLock<Mutex<ConnectionTracker>> = OnceLock::new();
+static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
+
+const MAX_CLOSED_CONNECTIONS: usize = 128;
+
+pub struct ConnectionRecord {
+    pub id: u64,
+    pub network: &'static str,
+    pub host: String,
+    pub destination_ip: String,
+    pub destination_port: u16,
+    pub source_ip: String,
+    pub source_port: u16,
+    pub rule: String,
+    pub rule_payload: String,
+    pub proxy_chain: Vec<String>,
+    pub upload_bytes: u64,
+    pub download_bytes: u64,
+    pub closed: bool,
+}
+
+struct ConnectionTracker {
+    active: HashMap<u64, ConnectionRecord>,
+    closed: VecDeque<ConnectionRecord>,
+}
+
+fn connection_tracker() -> &'static Mutex<ConnectionTracker> {
+    CONNECTION_TRACKER.get_or_init(|| {
+        Mutex::new(ConnectionTracker {
+            active: HashMap::new(),
+            closed: VecDeque::new(),
+        })
+    })
+}
+
+pub fn register_connection(
+    network: &'static str,
+    host: &str,
+    dest_ip: &str,
+    dest_port: u16,
+    src_ip: &str,
+    src_port: u16,
+) -> u64 {
+    let id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
+    let record = ConnectionRecord {
+        id,
+        network,
+        host: host.to_string(),
+        destination_ip: dest_ip.to_string(),
+        destination_port: dest_port,
+        source_ip: src_ip.to_string(),
+        source_port: src_port,
+        rule: String::new(),
+        rule_payload: String::new(),
+        proxy_chain: Vec::new(),
+        upload_bytes: 0,
+        download_bytes: 0,
+        closed: false,
+    };
+    if let Ok(mut tracker) = connection_tracker().lock() {
+        tracker.active.insert(id, record);
+    }
+    id
+}
+
+pub fn register_connection_with_metadata(
+    network: &'static str,
+    host: &str,
+    dest_ip: &str,
+    dest_port: u16,
+    src_ip: &str,
+    src_port: u16,
+    rule: &str,
+    rule_payload: &str,
+    proxy_chain: Vec<String>,
+) -> u64 {
+    let id = register_connection(network, host, dest_ip, dest_port, src_ip, src_port);
+    set_connection_metadata(id, rule, rule_payload, proxy_chain);
+    id
+}
+
+pub fn set_connection_metadata(id: u64, rule: &str, rule_payload: &str, proxy_chain: Vec<String>) {
+    if let Ok(mut tracker) = connection_tracker().lock() {
+        if let Some(record) = tracker.active.get_mut(&id) {
+            record.rule = rule.to_string();
+            record.rule_payload = rule_payload.to_string();
+            record.proxy_chain = proxy_chain;
+        }
+    }
+}
+
+pub fn add_connection_bytes(id: u64, upload: u64, download: u64) {
+    if let Ok(mut tracker) = connection_tracker().lock() {
+        if let Some(record) = tracker.active.get_mut(&id) {
+            record.upload_bytes = record.upload_bytes.saturating_add(upload);
+            record.download_bytes = record.download_bytes.saturating_add(download);
+        }
+    }
+}
+
+pub fn finish_connection(id: u64) {
+    if let Ok(mut tracker) = connection_tracker().lock()
+        && let Some(mut record) = tracker.active.remove(&id)
+    {
+        record.closed = true;
+        tracker.closed.push_back(record);
+        while tracker.closed.len() > MAX_CLOSED_CONNECTIONS {
+            tracker.closed.pop_front();
+        }
+    }
+}
+
+pub fn close_connection(id: u64, upload: u64, download: u64) {
+    add_connection_bytes(id, upload, download);
+    finish_connection(id);
+}
+
+pub fn connections_snapshot_json() -> String {
+    let tracker = match connection_tracker().lock() {
+        Ok(t) => t,
+        Err(_) => return "[]".to_string(),
+    };
+
+    let mut out = String::from("[");
+    let mut first = true;
+
+    for record in tracker.active.values() {
+        append_connection_json(&mut out, record, &mut first);
+    }
+    for record in &tracker.closed {
+        append_connection_json(&mut out, record, &mut first);
+    }
+
+    out.push(']');
+    out
+}
+
+pub fn connections_summary_json() -> String {
+    let tracker = match connection_tracker().lock() {
+        Ok(t) => t,
+        Err(_) => return "{\"active\":0,\"closed\":0,\"sample\":null}".to_string(),
+    };
+    let sample = tracker
+        .active
+        .values()
+        .next()
+        .or_else(|| tracker.closed.back());
+
+    let sample_json = if let Some(record) = sample {
+        let mut out = String::new();
+        let mut first = true;
+        append_connection_json(&mut out, record, &mut first);
+        out
+    } else {
+        "null".to_string()
+    };
+
+    format!(
+        "{{\"active\":{},\"closed\":{},\"sample\":{}}}",
+        tracker.active.len(),
+        tracker.closed.len(),
+        sample_json
+    )
+}
+
+pub fn active_connection_count() -> usize {
+    match connection_tracker().lock() {
+        Ok(tracker) => tracker.active.len(),
+        Err(_) => 0,
+    }
+}
+
+pub fn reset_connections() {
+    if let Ok(mut tracker) = connection_tracker().lock() {
+        tracker.active.clear();
+        tracker.closed.clear();
+    }
+    NEXT_CONN_ID.store(1, Ordering::Relaxed);
+}
+
+fn append_connection_json(out: &mut String, r: &ConnectionRecord, first: &mut bool) {
+    if !*first {
+        out.push(',');
+    }
+    *first = false;
+    out.push_str(&format!(
+        "{{\"id\":\"{}\",\"network\":\"{}\",\"host\":\"{}\",\"destinationIP\":\"{}\",\"destinationPort\":{},\"sourceIP\":\"{}\",\"sourcePort\":{},\"type\":\"{}\",\"rule\":\"{}\",\"rulePayload\":\"{}\",\"proxyChain\":[{}],\"uploadBytes\":{},\"downloadBytes\":{}}}",
+        r.id,
+        r.network,
+        json_escape(&r.host),
+        json_escape(&r.destination_ip),
+        r.destination_port,
+        json_escape(&r.source_ip),
+        r.source_port,
+        r.network.to_uppercase(),
+        json_escape(&r.rule),
+        json_escape(&r.rule_payload),
+        r.proxy_chain
+            .iter()
+            .map(|hop| format!("\"{}\"", json_escape(hop)))
+            .collect::<Vec<String>>()
+            .join(","),
+        r.upload_bytes,
+        r.download_bytes,
+    ));
+}
+
+struct ConnectionGuard {
+    id: u64,
+    finished: bool,
+}
+
+impl ConnectionGuard {
+    fn new(id: u64) -> Self {
+        Self {
+            id,
+            finished: false,
+        }
+    }
+
+    fn finish(&mut self) {
+        if !self.finished {
+            finish_connection(self.id);
+            self.finished = true;
+        }
+    }
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+enum ConnectionByteDirection {
+    Upload,
+    Download,
+}
+
+struct CountingIo<S> {
+    inner: S,
+    conn_id: u64,
+    read_direction: ConnectionByteDirection,
+}
+
+impl<S> CountingIo<S> {
+    fn new(inner: S, conn_id: u64, read_direction: ConnectionByteDirection) -> Self {
+        Self {
+            inner,
+            conn_id,
+            read_direction,
+        }
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for CountingIo<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        if let Poll::Ready(Ok(())) = &result {
+            let n = buf.filled().len().saturating_sub(before) as u64;
+            if n > 0 {
+                match self.read_direction {
+                    ConnectionByteDirection::Upload => add_connection_bytes(self.conn_id, n, 0),
+                    ConnectionByteDirection::Download => add_connection_bytes(self.conn_id, 0, n),
+                }
+            }
+        }
+        result
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for CountingIo<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 pub fn route_debug_json() -> String {
     let guard = route_debug().lock().expect("route debug state poisoned");
     format!(
@@ -265,14 +566,21 @@ pub async fn run_tun_server(
                 let resolver = resolver.clone();
 
                 tokio::spawn(async move {
+                    let source_addr = new_conn.source_addr;
                     let remote_addr = new_conn.remote_addr;
                     let target = socket_addr_to_net_location(remote_addr);
 
                     debug!("Handling TCP connection to {:?}", target);
 
                     if let Err(e) =
-                        handle_tcp_connection(new_conn.connection, target, proxy_selector, resolver)
-                            .await
+                        handle_tcp_connection(
+                            new_conn.connection,
+                            source_addr,
+                            target,
+                            proxy_selector,
+                            resolver,
+                        )
+                        .await
                     {
                         debug!("TCP connection to {} failed: {}", remote_addr, e);
                     }
@@ -335,9 +643,18 @@ fn socket_addr_to_net_location(addr: SocketAddr) -> NetLocation {
     fake_dns::resolve_fake_location(&NetLocation::new(address, addr.port()))
 }
 
+fn extract_host_ip(target: &NetLocation) -> (String, String) {
+    match target.address() {
+        Address::Hostname(h) => (h.clone(), String::new()),
+        Address::Ipv4(ip) => (ip.to_string(), ip.to_string()),
+        Address::Ipv6(ip) => (ip.to_string(), ip.to_string()),
+    }
+}
+
 /// Handle a TCP connection by forwarding it through the proxy chain.
 async fn handle_tcp_connection(
     mut connection: tcp_conn::TcpConnection,
+    source_addr: SocketAddr,
     target: NetLocation,
     proxy_selector: Arc<ClientProxySelector>,
     resolver: Arc<dyn Resolver>,
@@ -352,6 +669,9 @@ async fn handle_tcp_connection(
         return Ok(());
     }
     record_tcp_target(&target);
+    let (host, dest_ip) = extract_host_ip(&target);
+    let dest_port = target.port();
+    let target_for_log = target.to_string();
     let decision = proxy_selector.judge(target.into(), &resolver).await?;
 
     match decision {
@@ -359,6 +679,18 @@ async fn handle_tcp_connection(
             chain_group,
             remote_location,
         } => {
+            let conn_id = register_connection_with_metadata(
+                "tcp",
+                &host,
+                &dest_ip,
+                dest_port,
+                &source_addr.ip().to_string(),
+                source_addr.port(),
+                "MATCH",
+                &target_for_log,
+                chain_group.describe_for_log(),
+            );
+            let mut conn_guard = ConnectionGuard::new(conn_id);
             debug!(
                 "TCP: connecting to {} via chain",
                 remote_location.location()
@@ -375,7 +707,14 @@ async fn handle_tcp_connection(
                         remote_location.location()
                     );
 
-                    let mut remote = setup_result.client_stream;
+                    let remote = setup_result.client_stream;
+                    if !initial_data.is_empty() {
+                        add_connection_bytes(conn_id, initial_data.len() as u64, 0);
+                    }
+                    let mut connection =
+                        CountingIo::new(connection, conn_id, ConnectionByteDirection::Upload);
+                    let mut remote =
+                        CountingIo::new(remote, conn_id, ConnectionByteDirection::Download);
                     if !initial_data.is_empty() {
                         remote.write_all(&initial_data).await?;
                         remote.flush().await?;
@@ -390,6 +729,7 @@ async fn handle_tcp_connection(
                                 client_to_remote,
                                 remote_to_client
                             );
+                            conn_guard.finish();
                         }
                         Err(e) => {
                             debug!(
@@ -397,6 +737,13 @@ async fn handle_tcp_connection(
                                 remote_location.location(),
                                 e
                             );
+                            set_connection_metadata(
+                                conn_id,
+                                "COPY_ERROR",
+                                &e.to_string(),
+                                chain_group.describe_for_log(),
+                            );
+                            conn_guard.finish();
                         }
                     }
 
@@ -404,12 +751,31 @@ async fn handle_tcp_connection(
                 }
                 Err(e) => {
                     warn!("Failed to connect to {}: {}", remote_location.location(), e);
+                    set_connection_metadata(
+                        conn_id,
+                        "CONNECT_ERROR",
+                        &e.to_string(),
+                        chain_group.describe_for_log(),
+                    );
+                    conn_guard.finish();
                     Err(e)
                 }
             }
         }
         crate::client_proxy_selector::ConnectDecision::Block => {
             debug!("TCP connection blocked by rules");
+            let conn_id = register_connection_with_metadata(
+                "tcp",
+                &host,
+                &dest_ip,
+                dest_port,
+                &source_addr.ip().to_string(),
+                source_addr.port(),
+                "BLOCK",
+                &target_for_log,
+                vec!["BLOCK".to_string()],
+            );
+            finish_connection(conn_id);
             Ok(())
         }
     }

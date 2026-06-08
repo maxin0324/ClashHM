@@ -153,8 +153,9 @@ struct LogPage {
             };
           });
         }
-      } catch (_e) {
-        // Fall back to the local preview service below.
+        this.diagnosticText = `${this.diagnosticText}\nconnections: ${result.error || result.data || 'empty response'}`;
+      } catch (e) {
+        this.diagnosticText = `${this.diagnosticText}\nconnections: ${String(e)}`;
       }
     }
     return this.service.getConnections();
