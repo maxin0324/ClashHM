@@ -3,7 +3,7 @@
 use std::io::{self, Read, Write};
 
 use aws_lc_rs::{agreement, digest};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 
 use super::common::{
     ALERT_DESC_CLOSE_NOTIFY, ALERT_LEVEL_WARNING, CIPHERTEXT_READ_BUF_CAPACITY, CONTENT_TYPE_ALERT,
@@ -208,9 +208,6 @@ impl RealityClientConnection {
         client_hello[39..71].fill(0);
 
         log::debug!("REALITY CLIENT: Encrypting SessionId");
-        log::debug!("  auth_key={:02x?}", &auth_key);
-        log::debug!("  nonce={:02x?}", nonce);
-        log::debug!("  plaintext={:02x?}", &session_id_plaintext);
         log::debug!(
             "  aad_len={} (ClientHello with zero SessionId)",
             client_hello.len()
@@ -220,11 +217,6 @@ impl RealityClientConnection {
         let encrypted_session_id =
             encrypt_session_id(&session_id_plaintext, &auth_key, nonce, &client_hello)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-
-        log::debug!(
-            "REALITY CLIENT: Encrypted SessionId={:02x?}",
-            &encrypted_session_id
-        );
 
         // Restore the encrypted SessionId before writing or storing ClientHello.
         // REALITY transcripts use the wire ClientHello, not the zeroed AAD form.
@@ -475,14 +467,6 @@ impl RealityClientConnection {
 
         let (server_hs_key, server_hs_iv) =
             derive_traffic_keys(server_handshake_traffic_secret, *cipher_suite)?;
-
-        if *handshake_seq == 0 {
-            log::debug!(
-                "REALITY CLIENT: Server HS key={:02x?}, iv={:02x?}",
-                &server_hs_key[..16],
-                &server_hs_iv
-            );
-        }
 
         if self.ciphertext_read_buf.len() < TLS_RECORD_HEADER_SIZE {
             return Ok(false);

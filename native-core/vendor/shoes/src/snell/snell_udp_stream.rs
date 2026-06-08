@@ -150,8 +150,10 @@ impl AsyncWriteSourcedMessage for SnellUdpStream {
 
         let buf_len = buf.len();
         if buf_len + 19 > this.write_buf.len() {
-            // TODO: if it's too big, we need to split up the message into this.max_payload_size chunks.
-            panic!("single message is larger than our write buf: {buf_len}");
+            return Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Snell UDP message too large: {} bytes", buf_len),
+            )));
         }
 
         let offset = match source {
@@ -337,7 +339,10 @@ impl AsyncWriteTargetedMessage for SnellUdpClientStream {
         let buf_len = buf.len();
         // Max header: cmd(1) + addr_len(1) + ip_version(1) + ipv6(16) + port(2) = 21
         if buf_len + 21 > this.write_buf.len() {
-            panic!("single message is larger than our write buf: {buf_len}");
+            return Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Snell UDP message too large: {} bytes", buf_len),
+            )));
         }
 
         this.write_buf[0] = 1; // cmd = data

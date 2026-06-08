@@ -8,6 +8,7 @@ import { SubscriptionService } from '../services/SubscriptionService';
 import { ConfigManager } from '../services/ConfigManager';
 import { ProxySelectionService } from '../services/ProxySelectionService';
 import { NativeCoreExtensionService } from '../services/NativeCoreExtensionService';
+import { SettingsService } from '../services/SettingsService';
 import { callNativeCoreParseProxies } from '../services/NativeClash';
 import { vpnExtension } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -140,7 +141,7 @@ export struct HomePage {
         const vpnStartConfigPath = `${context.filesDir}/vpn-start-config.txt`;
         await this.stopVpnExtension(context);
 
-        const nativeCoreConfig = new ConfigManager(context).generateMergedConfig(activeSub.filePath);
+        const nativeCoreConfig = await this.generateNativeCoreConfig(context, activeSub.filePath);
         if (!nativeCoreConfig) {
           throw new Error(`Failed to read active subscription config: ${activeSub.filePath}`);
         }
@@ -235,6 +236,17 @@ export struct HomePage {
       this.copyStatus = '';
       this.refreshProfileSummary();
     }
+  }
+
+  private async generateNativeCoreConfig(context: common.UIAbilityContext, configPath: string): Promise<string> {
+    const nativeCoreConfig = new ConfigManager(context).generateMergedConfig(configPath);
+    if (!nativeCoreConfig) {
+      return nativeCoreConfig;
+    }
+    const settingsService = new SettingsService();
+    await settingsService.init(context);
+    const tlsClientMode = settingsService.getSettings().tlsClientMode === 'rustls' ? 'rustls' : 'chrome';
+    return `clashhm:\n  tls-client: ${tlsClientMode}\n` + nativeCoreConfig;
   }
 
   private async refreshProfileSummary(): Promise<void> {

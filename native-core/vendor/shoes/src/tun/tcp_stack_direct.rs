@@ -128,8 +128,10 @@ pub struct TcpStackDirect {
     udp_rx: Option<UnboundedReceiver<PacketBuffer>>,
     /// Shared state with the stack thread
     shared_state: Arc<Mutex<SharedState>>,
-    /// TUN file descriptor (owned, will be closed on drop)
+    /// TUN file descriptor
     tun_fd: RawFd,
+    /// Whether to close the fd when this struct is dropped
+    close_fd_on_drop: bool,
 }
 
 impl Drop for TcpStackDirect {
@@ -143,9 +145,10 @@ impl Drop for TcpStackDirect {
             let _ = handle.join();
         }
 
-        // Close the TUN fd
-        unsafe {
-            libc::close(self.tun_fd);
+        if self.close_fd_on_drop {
+            unsafe {
+                libc::close(self.tun_fd);
+            }
         }
     }
 }
@@ -159,7 +162,7 @@ impl TcpStackDirect {
     ///
     /// This spawns a dedicated OS thread for running the smoltcp interface.
     /// The thread uses `select()` on the fd for efficient event-driven I/O.
-    pub fn new(fd: RawFd, mtu: usize) -> Self {
+    pub fn new(fd: RawFd, mtu: usize, close_fd_on_drop: bool) -> Self {
         let (udp_tx, udp_rx) = mpsc::unbounded_channel();
 
         let running = Arc::new(AtomicBool::new(true));
@@ -209,6 +212,7 @@ impl TcpStackDirect {
             udp_rx: Some(udp_rx),
             shared_state,
             tun_fd: fd,
+            close_fd_on_drop,
         }
     }
 
@@ -994,7 +998,7 @@ mod tests {
         let (server, client) = UnixStream::pair().expect("Failed to create socket pair");
         let client_fd = client.into_raw_fd();
 
-        let stack = TcpStackDirect::new(client_fd, 1500);
+        let stack = TcpStackDirect::new(client_fd, 1500, true);
 
         thread::sleep(Duration::from_millis(100));
         assert!(stack.is_running(), "Stack thread should be running");
@@ -1018,7 +1022,7 @@ mod tests {
         let (server, client) = UnixStream::pair().expect("Failed to create socket pair");
         let client_fd = client.into_raw_fd();
 
-        let stack = TcpStackDirect::new(client_fd, 1500);
+        let stack = TcpStackDirect::new(client_fd, 1500, false);
 
         thread::sleep(Duration::from_millis(100));
         assert!(stack.is_running(), "Stack thread should be running");
@@ -1046,7 +1050,7 @@ mod tests {
         let (server, client) = UnixStream::pair().expect("Failed to create socket pair");
         let client_fd = client.into_raw_fd();
 
-        let stack = TcpStackDirect::new(client_fd, 1500);
+        let stack = TcpStackDirect::new(client_fd, 1500, true);
 
         thread::sleep(Duration::from_millis(100));
         assert!(stack.is_running());

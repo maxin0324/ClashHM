@@ -157,6 +157,7 @@ impl XudpMessageStream {
     ///   Ok(None) - Buffer doesn't contain a complete frame yet (need more data)
     ///   Err(e) - Error during decoding
     fn try_decode_one_frame(&mut self) -> std::io::Result<Option<(Vec<u8>, NetLocation)>> {
+      loop {
         log::debug!(
             "[XUDP READ] Attempting to decode frame, buffer len: {}",
             self.read_buffer.len()
@@ -230,11 +231,11 @@ impl XudpMessageStream {
                 }
                 self.session_to_original_destination
                     .remove(&metadata.session_id);
-                return self.try_decode_one_frame();
+                continue;
             }
 
             // No data, try to decode next frame
-            return self.try_decode_one_frame();
+            continue;
         }
 
         // Frame has data - check if we have the data length and data
@@ -311,7 +312,7 @@ impl XudpMessageStream {
 
         if data_len == 0 {
             // Empty data, try to decode next frame
-            return self.try_decode_one_frame();
+            continue;
         }
 
         // Extract data (already verified we have it)
@@ -339,7 +340,8 @@ impl XudpMessageStream {
             data.len(),
             destination
         );
-        Ok(Some((data, destination)))
+        return Ok(Some((data, destination)));
+      } // loop
     }
 }
 

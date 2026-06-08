@@ -5,7 +5,7 @@ use std::os::raw::{c_char, c_int};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const PARSER_VERSION: &str = "2026-06-07-yaml-dns-traffic-v6";
+const PARSER_VERSION: &str = "2026-06-08-mihomo-parity-v1";
 
 #[cfg(feature = "shoes-backend")]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,6 +43,34 @@ struct GeositeCategory {
     skipped_regex: usize,
 }
 
+#[derive(Clone, Debug, Default)]
+struct ClashDnsConfig {
+    enabled: bool,
+    ipv6: bool,
+    enhanced_mode: String,
+    fake_ip_range: String,
+    nameservers: Vec<String>,
+    default_nameservers: Vec<String>,
+    fake_ip_filter: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TlsClientMode {
+    Chrome,
+    Rustls,
+}
+
+impl Default for TlsClientMode {
+    fn default() -> Self {
+        Self::Chrome
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct RuntimeConfig {
+    tls_client_mode: TlsClientMode,
+}
+
 #[derive(Default)]
 struct CoreState {
     home_dir: String,
@@ -60,6 +88,8 @@ struct CoreState {
     last_traffic_at_ms: u128,
     last_upload_total: u64,
     last_download_total: u64,
+    dns_config: ClashDnsConfig,
+    runtime_config: RuntimeConfig,
 }
 
 static STATE: OnceLock<Mutex<CoreState>> = OnceLock::new();
@@ -464,9 +494,9 @@ fn assign_tls_opt(proxy: &mut ProxyNode, key: &str, value: String) {
         "sni" | "servername" | "server-name" | "server_name" => {
             assign_proxy_field(proxy, "sni", value)
         }
-        "fingerprint" | "server-fingerprint" | "client-fingerprint" => {
-            assign_proxy_field(proxy, "fingerprint", value)
-        }
+        "client-fingerprint" => assign_proxy_field(proxy, "client-fingerprint", value),
+        "fingerprint" => assign_proxy_field(proxy, "client-fingerprint", value),
+        "server-fingerprint" => assign_proxy_field(proxy, "server-fingerprint", value),
         "alpn" | "alpn-protocols" | "alpn_protocols" => assign_proxy_field(proxy, "alpn", value),
         _ => {
             proxy.fields.insert(format!("tls-{key}"), value);
@@ -1146,6 +1176,80 @@ fn parse_clash_config(config: &str) -> (Vec<ProxyNode>, Vec<ProxyGroup>, Vec<Cla
     parse_clash_config_fallback(config)
 }
 
+fn parse_clash_dns_config(config: &str) -> ClashDnsConfig {
+    let root = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+        Ok(root) => root,
+        Err(_) => return ClashDnsConfig::default(),
+    };
+    let serde_yaml::Value::Mapping(ref mapping) = root else {
+        return ClashDnsConfig::default();
+    };
+    let Some(serde_yaml::Value::Mapping(dns_section)) = yaml_mapping_get(mapping, "dns") else {
+        return ClashDnsConfig::default();
+    };
+
+    let enabled = yaml_mapping_get(dns_section, "enable")
+        .or_else(|| yaml_mapping_get(dns_section, "enabled"))
+        .map(yaml_value_to_string)
+        .map(|v| truthy(&v))
+        .unwrap_or(false);
+
+    let ipv6 = yaml_mapping_get(dns_section, "ipv6")
+        .map(yaml_value_to_string)
+        .map(|v| truthy(&v))
+        .unwrap_or(false);
+
+    let enhanced_mode = yaml_mapping_get(dns_section, "enhanced-mode")
+        .map(yaml_value_to_string)
+        .unwrap_or_else(|| "fake-ip".to_string());
+
+    let fake_ip_range = yaml_mapping_get(dns_section, "fake-ip-range")
+        .map(yaml_value_to_string)
+        .unwrap_or_else(|| "198.18.0.0/16".to_string());
+
+    let nameservers = yaml_sequence_strings(yaml_mapping_get(dns_section, "nameserver"));
+    let default_nameservers =
+        yaml_sequence_strings(yaml_mapping_get(dns_section, "default-nameserver"));
+    let fake_ip_filter = yaml_sequence_strings(yaml_mapping_get(dns_section, "fake-ip-filter"));
+
+    ClashDnsConfig {
+        enabled,
+        ipv6,
+        enhanced_mode,
+        fake_ip_range,
+        nameservers,
+        default_nameservers,
+        fake_ip_filter,
+    }
+}
+
+fn parse_runtime_config(config: &str) -> RuntimeConfig {
+    let root = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+        Ok(root) => root,
+        Err(_) => return RuntimeConfig::default(),
+    };
+    let serde_yaml::Value::Mapping(ref mapping) = root else {
+        return RuntimeConfig::default();
+    };
+    let Some(serde_yaml::Value::Mapping(runtime_section)) =
+        yaml_mapping_get(mapping, "clashhm").or_else(|| yaml_mapping_get(mapping, "clash-hm"))
+    else {
+        return RuntimeConfig::default();
+    };
+    let tls_mode = yaml_mapping_get(runtime_section, "tls-client")
+        .or_else(|| yaml_mapping_get(runtime_section, "tls-client-mode"))
+        .or_else(|| yaml_mapping_get(runtime_section, "tls-engine"))
+        .map(yaml_value_to_string)
+        .unwrap_or_else(|| "chrome".to_string());
+    RuntimeConfig {
+        tls_client_mode: if tls_mode.eq_ignore_ascii_case("rustls") {
+            TlsClientMode::Rustls
+        } else {
+            TlsClientMode::Chrome
+        },
+    }
+}
+
 fn parse_rule_line(line: &str) -> Option<ClashRule> {
     let mut parts = line
         .split(',')
@@ -1734,7 +1838,12 @@ fn wrap_grpc_transport(proxy: &ProxyNode, inner: String, indent: usize) -> Strin
     out
 }
 
-fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
+fn wrap_tls(
+    proxy: &ProxyNode,
+    inner: String,
+    indent: usize,
+    runtime_config: &RuntimeConfig,
+) -> String {
     let pad = protocol_indent(indent);
     let inner_pad = protocol_indent(indent + 2);
     let sni = proxy_field_any(proxy, &["sni", "servername", "host"]);
@@ -1751,12 +1860,21 @@ fn wrap_tls(proxy: &ProxyNode, inner: String, indent: usize) -> String {
             if truthy(skip_verify) { "false" } else { "true" }
         ));
     }
-    let fingerprint = proxy_field_any(proxy, &["fingerprint", "client-fingerprint"]);
-    if !fingerprint.is_empty() {
+    let server_fp = proxy_field(proxy, "server-fingerprint");
+    if !server_fp.is_empty() {
         out.push_str(&format!(
             "{pad}server_fingerprints: {}\n",
-            yaml_quote(fingerprint)
+            yaml_quote(server_fp)
         ));
+    }
+    let client_fp = proxy_field(proxy, "client-fingerprint");
+    if !client_fp.is_empty() {
+        out.push_str(&format!(
+            "{pad}client_fingerprint: {}\n",
+            yaml_quote(client_fp)
+        ));
+    } else if runtime_config.tls_client_mode == TlsClientMode::Chrome {
+        out.push_str(&format!("{pad}client_fingerprint: \"chrome\"\n"));
     }
     let alpn = proxy_field(proxy, "alpn");
     if !alpn.is_empty() {
@@ -1853,7 +1971,11 @@ fn wrap_shadow_tls(proxy: &ProxyNode, inner: String, indent: usize) -> Result<St
     Ok(out)
 }
 
-fn build_proxy_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, String> {
+fn build_proxy_protocol(
+    proxy: &ProxyNode,
+    indent: usize,
+    runtime_config: &RuntimeConfig,
+) -> Result<String, String> {
     let mut protocol = build_base_protocol(proxy, indent)?;
     let network = proxy_field(proxy, "network").to_lowercase();
     if network == "ws" || network == "websocket" {
@@ -1897,13 +2019,16 @@ fn build_proxy_protocol(proxy: &ProxyNode, indent: usize) -> Result<String, Stri
         || proxy.proxy_type.eq_ignore_ascii_case("naiveproxy")
     {
         if !falsy(proxy_field(proxy, "tls")) {
-            protocol = wrap_tls(proxy, protocol, indent);
+            protocol = wrap_tls(proxy, protocol, indent, runtime_config);
         }
     }
     Ok(protocol)
 }
 
-fn build_shoes_client_chain(proxy: &ProxyNode) -> Result<String, String> {
+fn build_shoes_client_chain(
+    proxy: &ProxyNode,
+    runtime_config: &RuntimeConfig,
+) -> Result<String, String> {
     let proxy_type = proxy.proxy_type.to_lowercase();
     if proxy_type == "direct" {
         return Ok("        - protocol:\n            type: direct\n".to_string());
@@ -1913,7 +2038,7 @@ fn build_shoes_client_chain(proxy: &ProxyNode) -> Result<String, String> {
     if server.is_empty() || port.is_empty() {
         return Err(format!("proxy {} missing server/port", proxy.name));
     }
-    let protocol = build_proxy_protocol(proxy, 12)?;
+    let protocol = build_proxy_protocol(proxy, 12, runtime_config)?;
     let mut out = format!(
         "        - address: {}\n          protocol:\n{}",
         yaml_quote(&format!("{server}:{port}")),
@@ -1967,7 +2092,7 @@ fn append_quic_client_settings(proxy: &ProxyNode, out: &mut String) {
 }
 
 fn build_probe_client_group(proxy: &ProxyNode) -> Result<String, String> {
-    let chain = build_shoes_client_chain(proxy)?;
+    let chain = build_shoes_client_chain(proxy, &RuntimeConfig::default())?;
     Ok(format!(
         "- client_group: \"__clashhm_probe\"\n  client_proxies:\n{chain}"
     ))
@@ -1982,13 +2107,23 @@ fn build_rule_client_chain(
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
 ) -> Result<Option<String>, String> {
-    build_rule_client_chain_inner(target, groups, proxies, 0)
+    build_rule_client_chain_with_runtime(target, groups, proxies, &RuntimeConfig::default())
+}
+
+fn build_rule_client_chain_with_runtime(
+    target: &str,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
+) -> Result<Option<String>, String> {
+    build_rule_client_chain_inner(target, groups, proxies, runtime_config, 0)
 }
 
 fn build_rule_client_chain_inner(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
     depth: usize,
 ) -> Result<Option<String>, String> {
     if depth > groups.len() + 1 {
@@ -2003,15 +2138,15 @@ fn build_rule_client_chain_inner(
         return Ok(None);
     }
     if let Some(proxy) = proxies.iter().find(|proxy| proxy.name == target) {
-        return build_shoes_client_chain(proxy).map(Some);
+        return build_shoes_client_chain(proxy, runtime_config).map(Some);
     }
     if let Some(selected) = selected_target_for_group(target, groups) {
-        return build_rule_client_chain_inner(selected, groups, proxies, depth + 1);
+        return build_rule_client_chain_inner(selected, groups, proxies, runtime_config, depth + 1);
     }
     if depth == 0 {
         let proxy = selected_proxy(groups, proxies)
             .ok_or_else(|| format!("rule target {target} did not resolve to a proxy"))?;
-        return build_shoes_client_chain(proxy).map(Some);
+        return build_shoes_client_chain(proxy, runtime_config).map(Some);
     }
     Err(format!("rule target {target} did not resolve to a proxy"))
 }
@@ -2306,8 +2441,15 @@ fn build_domain_keyword_rule_yaml(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
-    build_domain_keywords_rule_yaml(&[keyword.to_string()], target, groups, proxies)
+    build_domain_keywords_rule_yaml(
+        &[keyword.to_string()],
+        target,
+        groups,
+        proxies,
+        runtime_config,
+    )
 }
 
 fn yaml_quoted_list(values: &[String], indent: &str) -> String {
@@ -2329,11 +2471,12 @@ fn build_domain_keywords_rule_yaml(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
     if keywords.is_empty() {
         return Ok(String::new());
     }
-    match build_rule_client_chain(target, groups, proxies)? {
+    match build_rule_client_chain_with_runtime(target, groups, proxies, runtime_config)? {
         Some(chain) => Ok(format!(
             "    - masks: \"0.0.0.0/0\"\n      domain_keywords: {}\n      action: allow\n      client_chain:\n{chain}",
             yaml_quoted_list(keywords, "        ")
@@ -2391,8 +2534,9 @@ fn build_rule_yaml(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
-    match build_rule_client_chain(target, groups, proxies)? {
+    match build_rule_client_chain_with_runtime(target, groups, proxies, runtime_config)? {
         Some(chain) => Ok(format!(
             "    - masks: {}\n      action: allow\n      client_chain:\n{chain}",
             yaml_quote(mask)
@@ -2409,11 +2553,12 @@ fn build_rule_masks_yaml(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
     if masks.is_empty() {
         return Ok(String::new());
     }
-    match build_rule_client_chain(target, groups, proxies)? {
+    match build_rule_client_chain_with_runtime(target, groups, proxies, runtime_config)? {
         Some(chain) => Ok(format!(
             "    - masks: {}\n      action: allow\n      client_chain:\n{chain}",
             yaml_quoted_list(masks, "        ")
@@ -2430,8 +2575,9 @@ fn build_geoip_country_rule_yaml(
     target: &str,
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
-    match build_rule_client_chain(target, groups, proxies)? {
+    match build_rule_client_chain_with_runtime(target, groups, proxies, runtime_config)? {
         Some(chain) => Ok(format!(
             "    - masks: \"0.0.0.0/0\"\n      geoip_countries: {}\n      action: allow\n      client_chain:\n{chain}",
             yaml_quote(country)
@@ -2443,7 +2589,11 @@ fn build_geoip_country_rule_yaml(
     }
 }
 
-fn build_default_rule(groups: &[ProxyGroup], proxies: &[ProxyNode]) -> Result<String, String> {
+fn build_default_rule(
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+    runtime_config: &RuntimeConfig,
+) -> Result<String, String> {
     let target = selected_group(groups)
         .and_then(|group| {
             if group.now.is_empty() {
@@ -2454,13 +2604,22 @@ fn build_default_rule(groups: &[ProxyGroup], proxies: &[ProxyNode]) -> Result<St
         })
         .or_else(|| proxies.first().map(|proxy| proxy.name.as_str()))
         .ok_or_else(|| "no selected proxy found in Clash config".to_string())?;
-    build_rule_yaml("0.0.0.0/0", target, groups, proxies)
+    build_rule_yaml("0.0.0.0/0", target, groups, proxies, runtime_config)
 }
 
 fn build_shoes_rules(
     groups: &[ProxyGroup],
     proxies: &[ProxyNode],
     rules: &[ClashRule],
+) -> Result<String, String> {
+    build_shoes_rules_with_runtime(groups, proxies, rules, &RuntimeConfig::default())
+}
+
+fn build_shoes_rules_with_runtime(
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+    rules: &[ClashRule],
+    runtime_config: &RuntimeConfig,
 ) -> Result<String, String> {
     let mut out = String::new();
     for rule in rules {
@@ -2470,6 +2629,7 @@ fn build_shoes_rules(
                 &rule.target,
                 groups,
                 proxies,
+                runtime_config,
             )?);
             continue;
         }
@@ -2479,12 +2639,14 @@ fn build_shoes_rules(
                 &rule.target,
                 groups,
                 proxies,
+                runtime_config,
             )?);
             out.push_str(&build_domain_keywords_rule_yaml(
                 &category.keywords,
                 &rule.target,
                 groups,
                 proxies,
+                runtime_config,
             )?);
             continue;
         }
@@ -2494,6 +2656,7 @@ fn build_shoes_rules(
                 &rule.target,
                 groups,
                 proxies,
+                runtime_config,
             )?);
             continue;
         }
@@ -2501,11 +2664,17 @@ fn build_shoes_rules(
             continue;
         };
         for mask in masks {
-            out.push_str(&build_rule_yaml(&mask, &rule.target, groups, proxies)?);
+            out.push_str(&build_rule_yaml(
+                &mask,
+                &rule.target,
+                groups,
+                proxies,
+                runtime_config,
+            )?);
         }
     }
     if !out.contains("0.0.0.0/0") {
-        out.push_str(&build_default_rule(groups, proxies)?);
+        out.push_str(&build_default_rule(groups, proxies, runtime_config)?);
     }
     Ok(out)
 }
@@ -2516,7 +2685,17 @@ fn build_shoes_tun_config(
     proxies: &[ProxyNode],
     rules: &[ClashRule],
 ) -> Result<String, String> {
-    let rules_yaml = build_shoes_rules(groups, proxies, rules)?;
+    build_shoes_tun_config_with_runtime(tun_fd, groups, proxies, rules, &RuntimeConfig::default())
+}
+
+fn build_shoes_tun_config_with_runtime(
+    tun_fd: i32,
+    groups: &[ProxyGroup],
+    proxies: &[ProxyNode],
+    rules: &[ClashRule],
+    runtime_config: &RuntimeConfig,
+) -> Result<String, String> {
+    let rules_yaml = build_shoes_rules_with_runtime(groups, proxies, rules, runtime_config)?;
     Ok(format!(
         "- device_fd: {tun_fd}\n  address: \"10.249.0.1\"\n  netmask: \"255.255.255.252\"\n  mtu: 1400\n  tcp_enabled: true\n  udp_enabled: true\n  icmp_enabled: true\n  rules:\n{rules_yaml}"
     ))
@@ -2540,7 +2719,182 @@ fn stop_shoes_backend() {
 }
 
 #[cfg(feature = "shoes-backend")]
-fn start_shoes_backend(shoes_yaml: String) -> Result<(), String> {
+fn build_fake_dns_config(dns_config: &ClashDnsConfig) -> shoes::tun::fake_dns::FakeDnsConfig {
+    use shoes::tun::fake_dns::{FakeDnsConfig, FakeIpFilterEntry};
+
+    let (fake_ip_range_base, fake_ip_range_prefix) = parse_ipv4_cidr(&dns_config.fake_ip_range)
+        .unwrap_or((std::net::Ipv4Addr::new(198, 18, 0, 0), 16));
+    let filter = dns_config
+        .fake_ip_filter
+        .iter()
+        .map(|pattern| {
+            let trimmed = pattern.trim();
+            if let Some(keyword) = trimmed.strip_prefix("KEYWORD:") {
+                FakeIpFilterEntry::Keyword(keyword.to_ascii_lowercase())
+            } else if let Some(suffix) = trimmed.strip_prefix("+.") {
+                FakeIpFilterEntry::Suffix(suffix.to_ascii_lowercase())
+            } else if let Some(suffix) = trimmed.strip_prefix("*.") {
+                FakeIpFilterEntry::Suffix(suffix.to_ascii_lowercase())
+            } else {
+                FakeIpFilterEntry::Exact(trimmed.to_ascii_lowercase())
+            }
+        })
+        .collect();
+
+    FakeDnsConfig {
+        enabled: dns_config.enabled && dns_config.enhanced_mode.eq_ignore_ascii_case("fake-ip"),
+        ipv6_enabled: dns_config.ipv6,
+        fake_ip_range_base,
+        fake_ip_range_prefix,
+        fake_ip_filter: filter,
+    }
+}
+
+#[cfg(feature = "shoes-backend")]
+fn parse_ipv4_cidr(value: &str) -> Option<(std::net::Ipv4Addr, u8)> {
+    let (addr, prefix) = value.trim().split_once('/')?;
+    let addr = addr.parse::<std::net::Ipv4Addr>().ok()?;
+    let prefix = prefix.parse::<u8>().ok()?;
+    if prefix > 32 {
+        return None;
+    }
+    Some((addr, prefix))
+}
+
+#[cfg(feature = "shoes-backend")]
+fn normalize_clash_dns_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.parse::<std::net::IpAddr>().is_ok() {
+        return format!("udp://{trimmed}");
+    }
+    if trimmed.parse::<std::net::SocketAddr>().is_ok() {
+        return format!("udp://{trimmed}");
+    }
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    format!("udp://{trimmed}")
+}
+
+#[cfg(feature = "shoes-backend")]
+async fn build_clash_dns_resolvers(
+    dns_config: &ClashDnsConfig,
+) -> Result<
+    (
+        Arc<dyn shoes::resolver::Resolver>,
+        Arc<dyn shoes::resolver::Resolver>,
+    ),
+    String,
+> {
+    use shoes::config::ExpandedDnsGroup;
+    use shoes::config::ExpandedDnsSpec;
+    use shoes::dns::{build_dns_registry, IpStrategy};
+    use shoes::resolver::CachingNativeResolver;
+
+    let bootstrap_specs: Vec<ExpandedDnsSpec> = dns_config
+        .default_nameservers
+        .iter()
+        .map(|url| ExpandedDnsSpec {
+            url: normalize_clash_dns_url(url),
+            server_name: None,
+            client_chains: vec![],
+            bootstrap_url: None,
+            ip_strategy: IpStrategy::Ipv4Only,
+            timeout_secs: 5,
+            connect_timeout_secs: 5,
+            attempts: 2,
+        })
+        .collect();
+
+    let bootstrap_group = ExpandedDnsGroup {
+        name: "__bootstrap".to_string(),
+        specs: if bootstrap_specs.is_empty() {
+            vec![ExpandedDnsSpec {
+                url: "system".to_string(),
+                server_name: None,
+                client_chains: vec![],
+                bootstrap_url: None,
+                ip_strategy: IpStrategy::Ipv4Only,
+                timeout_secs: 5,
+                connect_timeout_secs: 5,
+                attempts: 1,
+            }]
+        } else {
+            bootstrap_specs
+        },
+    };
+
+    if dns_config.nameservers.is_empty() || !dns_config.enabled {
+        let groups = vec![bootstrap_group];
+        let registry = build_dns_registry(groups)
+            .await
+            .map_err(|e| format!("bootstrap DNS build failed: {e}"))?;
+        let resolver = registry
+            .get_by_name("__bootstrap")
+            .unwrap_or_else(|| Arc::new(CachingNativeResolver::new()));
+        return Ok((resolver.clone(), resolver));
+    }
+
+    let main_specs: Vec<ExpandedDnsSpec> = dns_config
+        .nameservers
+        .iter()
+        .map(|url| {
+            let normalized = normalize_clash_dns_url(url);
+            let needs_bootstrap = normalized.contains("://") && !normalized.starts_with("udp://")
+                || {
+                    let after_scheme = normalized
+                        .find("://")
+                        .map(|i| &normalized[i + 3..])
+                        .unwrap_or(&normalized);
+                    let host_part = after_scheme.split('/').next().unwrap_or("");
+                    let host_part = host_part.split(':').next().unwrap_or("");
+                    host_part.parse::<std::net::IpAddr>().is_err()
+                };
+            ExpandedDnsSpec {
+                url: normalized,
+                server_name: None,
+                client_chains: vec![],
+                bootstrap_url: if needs_bootstrap {
+                    Some("__bootstrap".to_string())
+                } else {
+                    None
+                },
+                ip_strategy: if dns_config.ipv6 {
+                    IpStrategy::Ipv4ThenIpv6
+                } else {
+                    IpStrategy::Ipv4Only
+                },
+                timeout_secs: 5,
+                connect_timeout_secs: 5,
+                attempts: 1,
+            }
+        })
+        .collect();
+
+    let groups = vec![
+        bootstrap_group,
+        ExpandedDnsGroup {
+            name: "__main".to_string(),
+            specs: main_specs,
+        },
+    ];
+
+    let registry = build_dns_registry(groups)
+        .await
+        .map_err(|e| format!("DNS registry build failed: {e}"))?;
+
+    let main_resolver = registry
+        .get_by_name("__main")
+        .unwrap_or_else(|| Arc::new(CachingNativeResolver::new()));
+    let bootstrap_resolver = registry
+        .get_by_name("__bootstrap")
+        .unwrap_or_else(|| Arc::new(CachingNativeResolver::new()));
+
+    Ok((main_resolver, bootstrap_resolver))
+}
+
+#[cfg(feature = "shoes-backend")]
+fn start_shoes_backend(shoes_yaml: String, dns_config: ClashDnsConfig) -> Result<(), String> {
     stop_shoes_backend();
     shoes::tun::reset_traffic_snapshot();
     let configs = shoes::config::load_config_str(&shoes_yaml).map_err(|e| e.to_string())?;
@@ -2561,8 +2915,27 @@ fn start_shoes_backend(shoes_yaml: String) -> Result<(), String> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let running = Arc::new(AtomicBool::new(true));
     let running_for_task = running.clone();
+    let fake_dns_cfg = build_fake_dns_config(&dns_config);
     runtime.spawn(async move {
-        let _ = shoes::tun::run_tun_from_config(tun_config, shutdown_rx, false).await;
+        shoes::tun::fake_dns::init(fake_dns_cfg);
+        let (main_resolver, bootstrap_resolver) = match build_clash_dns_resolvers(&dns_config).await
+        {
+            Ok(resolvers) => resolvers,
+            Err(e) => {
+                eprintln!("DNS resolver build failed, falling back to native: {}", e);
+                let native: Arc<dyn shoes::resolver::Resolver> =
+                    Arc::new(shoes::resolver::NativeResolver::new());
+                (native.clone(), native)
+            }
+        };
+        let _ = shoes::tun::run_tun_from_config_with_resolvers(
+            tun_config,
+            shutdown_rx,
+            false,
+            main_resolver,
+            bootstrap_resolver,
+        )
+        .await;
         running_for_task.store(false, Ordering::SeqCst);
     });
     *shoes_handle().lock().unwrap() = Some(ShoesHandle {
@@ -2594,9 +2967,14 @@ fn restart_backend_from_state(guard: &CoreState) -> Result<(), String> {
     if guard.tun_fd <= 0 {
         return Err("missing active TUN fd".to_string());
     }
-    let shoes_yaml =
-        build_shoes_tun_config(guard.tun_fd, &guard.groups, &guard.proxies, &guard.rules)?;
-    start_shoes_backend(shoes_yaml)
+    let shoes_yaml = build_shoes_tun_config_with_runtime(
+        guard.tun_fd,
+        &guard.groups,
+        &guard.proxies,
+        &guard.rules,
+        &guard.runtime_config,
+    )?;
+    start_shoes_backend(shoes_yaml, guard.dns_config.clone())
 }
 
 #[cfg(not(feature = "shoes-backend"))]
@@ -2814,6 +3192,8 @@ pub extern "C" fn clashhm_native_core_start_tun(
         return -1;
     };
     let (proxies, groups, rules) = parse_clash_config(&config);
+    let dns_config = parse_clash_dns_config(&config);
+    let runtime_config = parse_runtime_config(&config);
     let shoes_config = if proxies.is_empty() && groups.is_empty() && !rules.is_empty() {
         Err(format!(
             "no proxies or proxy-groups parsed from Clash config; parserVersion={}; rules={}; has_proxy_providers={}; has_proxies_section={}; has_proxy_groups_section={}; proxiesSample={}; groupsSample={}",
@@ -2826,13 +3206,15 @@ pub extern "C" fn clashhm_native_core_start_tun(
             json_escape(&section_sample(&config, "proxy-groups:"))
         ))
     } else {
-        build_shoes_tun_config(tun_fd, &groups, &proxies, &rules)
+        build_shoes_tun_config_with_runtime(tun_fd, &groups, &proxies, &rules, &runtime_config)
     };
     let mut guard = state().lock().unwrap();
     guard.tun_fd = tun_fd;
     guard.proxies = proxies;
     guard.groups = groups;
     guard.rules = rules;
+    guard.dns_config = dns_config.clone();
+    guard.runtime_config = runtime_config;
     guard.delay_by_proxy.clear();
     guard.running = false;
     guard.last_traffic_at_ms = now_ms();
@@ -2849,7 +3231,7 @@ pub extern "C" fn clashhm_native_core_start_tun(
         Ok(shoes_yaml) => {
             #[cfg(feature = "shoes-backend")]
             {
-                match start_shoes_backend(shoes_yaml) {
+                match start_shoes_backend(shoes_yaml, dns_config) {
                     Ok(()) => {
                         guard.running = true;
                         guard.status = "shoes_backend_started".to_string();
@@ -3073,13 +3455,21 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         .unwrap_or("");
     let skipped_types = skipped_rule_types(&guard.rules);
     let skipped_count = skipped_rule_count(&guard.rules);
+    #[cfg(feature = "shoes-backend")]
+    let route_debug = shoes::tun::route_debug_json();
+    #[cfg(not(feature = "shoes-backend"))]
+    let route_debug = "{}".to_string();
     let uptime_ms = if running && guard.started_at_ms > 0 {
         now_ms().saturating_sub(guard.started_at_ms)
     } else {
         0
     };
+    let tls_client_mode = match guard.runtime_config.tls_client_mode {
+        TlsClientMode::Chrome => "chrome",
+        TlsClientMode::Rustls => "rustls",
+    };
     into_c_string(format!(
-        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"parserVersion\":\"{}\"}}",
+        "{{\"running\":{},\"engine\":\"{}\",\"tunFd\":{},\"status\":\"{}\",\"lastError\":\"{}\",\"selectedGroup\":\"{}\",\"selectedProxy\":\"{}\",\"selectedProxyType\":\"{}\",\"selectedProxyServer\":\"{}\",\"proxyCount\":{},\"groupCount\":{},\"ruleCount\":{},\"skippedRuleCount\":{},\"skippedRuleTypes\":{},\"routeDebug\":{},\"uptimeMs\":{},\"lastDelayMs\":{},\"tlsClientMode\":\"{}\",\"parserVersion\":\"{}\"}}",
         if running { "true" } else { "false" },
         json_escape(&guard.engine),
         guard.tun_fd,
@@ -3094,8 +3484,10 @@ pub extern "C" fn clashhm_native_core_get_status_json() -> *mut c_char {
         guard.rules.len(),
         skipped_count,
         json_string_array(&skipped_types),
+        route_debug,
         uptime_ms,
         guard.last_delay_ms,
+        tls_client_mode,
         json_escape(PARSER_VERSION)
     ))
 }

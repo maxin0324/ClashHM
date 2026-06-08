@@ -1,1 +1,1 @@
-clash/src/main/cpp/native-core/libclashhm_native_core.a.part* binary
+clash/src/main/cpp/native-core/libclashhm_native_core.a.part* filter=lfs diff=lfs merge=lfs -text

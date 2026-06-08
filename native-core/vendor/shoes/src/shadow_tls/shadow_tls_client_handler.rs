@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use tokio::io::AsyncWriteExt;
 
 use crate::address::ResolvedLocation;

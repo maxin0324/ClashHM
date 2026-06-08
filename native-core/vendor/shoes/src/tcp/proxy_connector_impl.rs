@@ -34,21 +34,21 @@ impl ProxyConnectorImpl {
     /// Create a ProxyConnector from a ClientConfig's protocol-related fields.
     ///
     /// Returns None for direct protocol (direct has no ProxyConnector).
-    pub fn from_config(config: ClientConfig, resolver: Arc<dyn Resolver>) -> Option<Self> {
+    pub fn from_config(config: ClientConfig, resolver: Arc<dyn Resolver>) -> std::io::Result<Option<Self>> {
         if config.protocol.is_direct() {
-            return None;
+            return Ok(None);
         }
 
         let default_sni_hostname = config.address.address().hostname().map(ToString::to_string);
 
-        Some(Self {
+        Ok(Some(Self {
             location: config.address,
             client_handler: create_tcp_client_handler(
                 config.protocol,
                 default_sni_hostname,
                 resolver,
-            ),
-        })
+            )?,
+        }))
     }
 
     /// Create a ProxyConnector directly from components.
@@ -115,7 +115,7 @@ mod tests {
     fn test_from_direct_config_returns_none() {
         let config = ClientConfig::default();
         assert!(config.protocol.is_direct());
-        assert!(ProxyConnectorImpl::from_config(config, mock_resolver()).is_none());
+        assert!(ProxyConnectorImpl::from_config(config, mock_resolver()).unwrap().is_none());
     }
 
     #[test]
@@ -128,7 +128,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let connector = ProxyConnectorImpl::from_config(config, mock_resolver());
+        let connector = ProxyConnectorImpl::from_config(config, mock_resolver()).unwrap();
         assert!(connector.is_some());
         let connector = connector.unwrap();
         assert_eq!(connector.proxy_location().port(), 1080);

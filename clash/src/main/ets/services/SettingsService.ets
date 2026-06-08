@@ -26,7 +26,7 @@ export class SettingsService {
       const data = await this.store.get(Constants.SETTINGS_KEY, '') as string;
       if (data) {
         const parsed = JSON.parse(data) as AppSettings;
-        this.settings = parsed;
+        this.settings = this.mergeDefaults(parsed);
       }
     } catch (e) {
       Logger.error('Failed to load settings: %{public}s', String(e));
@@ -49,6 +49,25 @@ export class SettingsService {
     return this.settings;
   }
 
+  private mergeDefaults(parsed: AppSettings): AppSettings {
+    const defaults = createDefaultSettings();
+    return {
+      tunMode: parsed.tunMode === false ? false : (parsed.tunMode === true ? true : defaults.tunMode),
+      tunStack: parsed.tunStack || defaults.tunStack,
+      dnsMode: parsed.dnsMode || defaults.dnsMode,
+      routingMode: parsed.routingMode || defaults.routingMode,
+      mixedPort: parsed.mixedPort || defaults.mixedPort,
+      allowLan: parsed.allowLan === true,
+      autoStart: parsed.autoStart === true,
+      autoConnect: parsed.autoConnect === true,
+      showNotification: parsed.showNotification === false ? false : defaults.showNotification,
+      theme: parsed.theme || defaults.theme,
+      language: parsed.language || defaults.language,
+      logLevel: parsed.logLevel || defaults.logLevel,
+      tlsClientMode: parsed.tlsClientMode || defaults.tlsClientMode,
+    };
+  }
+
   async update(key: string, value: string | boolean | number): Promise<void> {
     if (key === 'tunMode') this.settings.tunMode = value as boolean;
     else if (key === 'tunStack') this.settings.tunStack = value as string;
@@ -62,6 +81,7 @@ export class SettingsService {
     else if (key === 'theme') this.settings.theme = value as string;
     else if (key === 'language') this.settings.language = value as string;
     else if (key === 'logLevel') this.settings.logLevel = value as string;
+    else if (key === 'tlsClientMode') this.settings.tlsClientMode = value as string;
     await this.save();
   }
 }

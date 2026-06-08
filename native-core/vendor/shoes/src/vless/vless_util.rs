@@ -171,6 +171,9 @@ fn read_varint(data: &[u8]) -> std::io::Result<(u64, usize)> {
     let mut cursor = 0usize;
     let mut length = 0u64;
     loop {
+        if cursor >= data.len() {
+            return Err(std::io::Error::other("Varint is too long"));
+        }
         let byte = data[cursor];
         if (byte & 0b10000000) != 0 {
             length = (length << 8) | ((byte ^ 0b10000000) as u64);
@@ -178,7 +181,7 @@ fn read_varint(data: &[u8]) -> std::io::Result<(u64, usize)> {
             length = (length << 8) | (byte as u64);
             return Ok((length, cursor + 1));
         }
-        if cursor == 7 || cursor == data.len() {
+        if cursor == 7 {
             return Err(std::io::Error::other("Varint is too long"));
         }
         cursor += 1;

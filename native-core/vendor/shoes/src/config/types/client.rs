@@ -212,6 +212,8 @@ where
         shadowtls_password: Option<String>,
         #[serde(default)]
         vision: bool,
+        #[serde(default)]
+        client_fingerprint: Option<TlsFingerprint>,
         protocol: Box<ClientProxyConfig>,
     }
 
@@ -244,6 +246,7 @@ where
             key: temp.key,
             cert: temp.cert,
             vision: false,
+            client_fingerprint: temp.client_fingerprint,
             protocol: Box::new(ClientProxyConfig::ShadowTls {
                 password,
                 sni_hostname: temp.sni_hostname.into_option(),
@@ -262,6 +265,7 @@ where
         key: temp.key,
         cert: temp.cert,
         vision: temp.vision,
+        client_fingerprint: temp.client_fingerprint,
         protocol: temp.protocol,
     })
 }
@@ -483,6 +487,16 @@ impl ClientProxyConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TlsFingerprint {
+    Chrome,
+    Firefox,
+    Safari,
+    Edge,
+    Random,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TlsClientConfig {
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
@@ -513,6 +527,9 @@ pub struct TlsClientConfig {
     /// Requires TLS 1.3.
     #[serde(default, skip_serializing_if = "is_false")]
     pub vision: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_fingerprint: Option<TlsFingerprint>,
 
     pub protocol: Box<ClientProxyConfig>,
 }

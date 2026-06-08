@@ -11,6 +11,7 @@ export interface AppSettings {
   theme: string; // system, light, dark
   language: string; // system, zh_CN, en_US
   logLevel: string; // silent, error, warning, info, debug
+  tlsClientMode: string; // chrome, rustls
 }
 
 export function createDefaultSettings(): AppSettings {
@@ -27,5 +28,6 @@ export function createDefaultSettings(): AppSettings {
     theme: 'system',
     language: 'system',
     logLevel: 'info',
+    tlsClientMode: 'chrome',
   };
 }

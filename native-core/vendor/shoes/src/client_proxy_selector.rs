@@ -225,6 +225,10 @@ pub struct ClientProxySelector {
     cache: Option<RoutingCache>,
 }
 
+// SAFETY: All fields are Send+Sync: Vec<ConnectRule> contains only Send+Sync trait objects
+// (ProxyConnector: Send+Sync, SocketConnector: Send+Sync), bool is trivially Send+Sync,
+// and RoutingCache wraps LruCache in a RwLock. The unsafe impl exists because the compiler
+// cannot see through the trait object indirection in ClientChainGroup → ClientProxyChain.
 unsafe impl Send for ClientProxySelector {}
 unsafe impl Sync for ClientProxySelector {}
 

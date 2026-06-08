@@ -26,6 +26,7 @@ interface ExtensionConnectionInfo {
 struct LogPage {
   @State logs: LogItemModel[] = [];
   @State filterText: string = '';
+  @State diagnosticText: string = '';
   @State isLive: boolean = true;
   private service: IClashService | null = null;
   private pollTimer: number = -1;
@@ -49,6 +50,7 @@ struct LogPage {
     if (!this.service) {
       return;
     }
+    await this.loadDiagnostics();
     const rawLogs = await this.getConnectionLogs();
     let filtered = rawLogs;
     if (this.filterText.length > 0) {
@@ -60,6 +62,24 @@ struct LogPage {
       );
     }
     this.logs = filtered.map((l: LogEntry) => LogItemModel.fromLogEntry(l));
+  }
+
+  private async loadDiagnostics(): Promise<void> {
+    if (!this.service || this.service.getState() !== ConnectState.CONNECTED) {
+      this.diagnosticText = '';
+      return;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const status = await new NativeCoreExtensionService(context).getStatus();
+      if (status.ok && status.data) {
+        this.diagnosticText = status.data;
+      } else {
+        this.diagnosticText = status.error || status.data || 'Native status unavailable';
+      }
+    } catch (e) {
+      this.diagnosticText = `Native status unavailable: ${String(e)}`;
+    }
   }
 
   private async getConnectionLogs(): Promise<LogEntry[]> {
@@ -221,6 +241,28 @@ struct LogPage {
       .backgroundColor($r('app.color.card_bg'))
       .borderRadius(8)
       .border({ width: 1, color: $r('app.color.divider') })
+
+      if (this.diagnosticText) {
+        Column({ space: 6 }) {
+          Text('Diagnostics')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text(this.diagnosticText)
+            .fontSize(10)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(6)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .copyOption(CopyOptions.LocalDevice)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .margin({ left: 16, right: 16, bottom: 10 })
+        .backgroundColor($r('app.color.card_bg'))
+        .borderRadius(8)
+        .border({ width: 1, color: $r('app.color.divider') })
+      }
 
       List({ scroller: this.listScroller }) {
         ForEach(this.logs, (log: LogItemModel) => {

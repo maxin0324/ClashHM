@@ -3,7 +3,7 @@ use std::task::{Context, Poll};
 
 use futures::ready;
 use log::warn;
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::async_stream::{AsyncPing, AsyncStream};

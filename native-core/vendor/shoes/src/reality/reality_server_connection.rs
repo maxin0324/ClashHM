@@ -4,7 +4,7 @@
 // allowing REALITY to be used as a drop-in replacement for rustls.
 
 use aws_lc_rs::{agreement, digest};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use std::io::{self, Read, Write};
 use subtle::ConstantTimeEq;
 

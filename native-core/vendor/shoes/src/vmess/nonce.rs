@@ -19,7 +19,10 @@ impl NonceSequence for VmessNonceSequence {
         // the nonce is correct for the first packet since the first two
         // bytes are already zero.
         let ret = Nonce::assume_unique_for_key(self.nonce);
-        self.count = self.count.wrapping_add(1);
+        if self.count == u16::MAX {
+            return Err(Unspecified);
+        }
+        self.count += 1;
         self.nonce[0] = (self.count >> 8) as u8;
         self.nonce[1] = (self.count & 0xff) as u8;
         Ok(ret)

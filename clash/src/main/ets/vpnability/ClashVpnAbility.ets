@@ -188,6 +188,7 @@ export default class ClashVpnAbility extends VpnExtensionAbility {
         this.engineRunning = true;
         this.nativeCoreLoaded = true;
         this.writeStatus(`start result: native_core_started ret=${nativeCoreResult}`);
+        this.writeStatus(`native core status: ${this.getNativeCoreStatus()}`);
         return;
       }
       const nativeStatus = this.getNativeCoreStatus();

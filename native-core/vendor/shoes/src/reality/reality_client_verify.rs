@@ -134,19 +134,6 @@ pub fn verify_certificate_hmac(cert_der: &[u8], auth_key: &[u8; 32]) -> io::Resu
     let hmac_tag = hmac::sign(&hmac_key, pubkey_data);
     let expected_signature = hmac_tag.as_ref(); // Full 64 bytes
 
-    log::debug!(
-        "REALITY CLIENT: HMAC verification - ed25519_pubkey={:02x?}",
-        pubkey_data
-    );
-    log::debug!(
-        "REALITY CLIENT: HMAC verification - expected_sig={:02x?}",
-        expected_signature
-    );
-    log::debug!(
-        "REALITY CLIENT: HMAC verification - actual_sig={:02x?}",
-        signature
-    );
-
     // Compare full 64-byte signature with expected HMAC using constant-time comparison
     // to prevent timing attacks that could leak information about the expected signature
     if expected_signature.ct_eq(signature).unwrap_u8() == 0 {

@@ -1,6 +1,6 @@
 use aws_lc_rs::agreement;
 use base64::engine::{Engine as _, general_purpose::URL_SAFE_NO_PAD};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 
 use super::reality_cipher_suite::CipherSuite;
 use crate::buf_reader::BufReader;

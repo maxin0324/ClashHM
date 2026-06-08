@@ -65,6 +65,12 @@ export struct SettingsPage {
         }
 
         ListItem() {
+          this.selectorItem('TLS Client', this.settings.tlsClientMode, ['chrome', 'rustls'], (val: string) => {
+            this.updateSetting('tlsClientMode', val);
+          })
+        }
+
+        ListItem() {
           this.sectionHeader($r('app.string.settings_network'))
         }
 
@@ -166,7 +172,7 @@ export struct SettingsPage {
   }
 
   @Builder
-  selectorItem(title: Resource, current: string, options: string[], onChange: (val: string) => void) {
+  selectorItem(title: ResourceStr, current: string, options: string[], onChange: (val: string) => void) {
     Row() {
       Text(title)
         .fontSize(15)

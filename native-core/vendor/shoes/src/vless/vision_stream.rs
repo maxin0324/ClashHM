@@ -983,7 +983,12 @@ where
                     // to read
                     let plaintext_len =
                         feed_and_process_crypto_connection(&mut self.session, &remaining)?;
-                    assert!(plaintext_len == 0);
+                    if plaintext_len != 0 {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Unexpected plaintext data after Vision End command",
+                        ));
+                    }
                 }
 
                 // Switch to Tls mode - End command means: stop padding, continue normal relay through outer TLS

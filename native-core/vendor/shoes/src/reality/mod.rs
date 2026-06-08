@@ -2,21 +2,21 @@
 
 // REALITY protocol: TLS obfuscation using X25519, HKDF-SHA256, AES-256-GCM, HMAC-SHA512
 
-mod common;
-mod reality_aead;
+pub(crate) mod common;
+pub(crate) mod reality_aead;
 mod reality_auth;
 mod reality_certificate;
-mod reality_cipher_suite;
+pub(crate) mod reality_cipher_suite;
 mod reality_client_connection;
-mod reality_client_verify;
-mod reality_io_state;
-mod reality_reader_writer;
-mod reality_records;
+pub(crate) mod reality_client_verify;
+pub(crate) mod reality_io_state;
+pub(crate) mod reality_reader_writer;
+pub(crate) mod reality_records;
 mod reality_server_connection;
 mod reality_server_handler;
-mod reality_tls13_keys;
-mod reality_tls13_messages;
-mod reality_util;
+pub(crate) mod reality_tls13_keys;
+pub(crate) mod reality_tls13_messages;
+pub(crate) mod reality_util;
 
 pub use reality_cipher_suite::{CipherSuite, DEFAULT_CIPHER_SUITES};
 // generate_keypair is used by binary, not by library's public API

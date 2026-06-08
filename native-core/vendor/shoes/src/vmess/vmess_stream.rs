@@ -6,7 +6,7 @@ use bytes::BytesMut;
 use digest::XofReader;
 use futures::ready;
 use log::warn;
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::nonce::{SingleUseNonce, VmessNonceSequence};

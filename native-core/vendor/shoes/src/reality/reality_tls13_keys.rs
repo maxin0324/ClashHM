@@ -5,12 +5,13 @@
 
 use super::reality_cipher_suite::CipherSuite;
 use aws_lc_rs::{digest, hmac};
+use std::fmt;
 use std::io::{Error, ErrorKind, Result};
 
 /// Intermediate TLS 1.3 keys (handshake secrets + master secret)
 /// Used for two-phase key derivation where application secrets
 /// must be derived after server Finished message
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tls13HandshakeKeys {
     /// Client handshake traffic secret
     pub client_handshake_traffic_secret: Vec<u8>,
@@ -18,6 +19,16 @@ pub struct Tls13HandshakeKeys {
     pub server_handshake_traffic_secret: Vec<u8>,
     /// Master secret (for deriving application secrets later)
     pub master_secret: Vec<u8>,
+}
+
+impl fmt::Debug for Tls13HandshakeKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tls13HandshakeKeys")
+            .field("client_handshake_traffic_secret", &"[REDACTED]")
+            .field("server_handshake_traffic_secret", &"[REDACTED]")
+            .field("master_secret", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// HKDF-Expand implementation with configurable HMAC algorithm
@@ -53,12 +64,6 @@ pub fn hkdf_expand(
         ctx.update(info);
         ctx.update(&[i as u8]);
         let tag = ctx.sign();
-
-        log::debug!(
-            "HKDF iteration {}: output={:02x?}",
-            i,
-            &tag.as_ref()[..tag.as_ref().len().min(16)]
-        );
 
         prev = tag.as_ref().to_vec();
         output.extend_from_slice(tag.as_ref());
@@ -155,8 +160,6 @@ pub fn derive_traffic_keys(
         iv_length,
         hash_len
     );
-    log::debug!("TRAFFIC_KEY_DERIVE: traffic_secret={:02x?}", traffic_secret);
-
     // key = HKDF-Expand-Label(Secret, "key", "", key_length)
     let key =
         hkdf_expand_label_with_algorithm(hmac_algorithm, traffic_secret, b"key", b"", key_length)?;
@@ -164,9 +167,6 @@ pub fn derive_traffic_keys(
     // iv = HKDF-Expand-Label(Secret, "iv", "", iv_length)
     let iv =
         hkdf_expand_label_with_algorithm(hmac_algorithm, traffic_secret, b"iv", b"", iv_length)?;
-
-    log::debug!("TRAFFIC_KEY_DERIVE: key={:02x?}", key);
-    log::debug!("TRAFFIC_KEY_DERIVE: iv={:02x?}", iv);
 
     Ok((key, iv))
 }
@@ -270,8 +270,6 @@ pub fn derive_handshake_keys(
     // 7. Master Secret = HKDF-Extract(salt=derived_secret, IKM=0)
     let master_secret = hkdf_extract_with_algorithm(hmac_algorithm, &derived_secret_2, &zero_salt);
 
-    log::debug!("  master_secret: {:?}", &master_secret[..8]);
-
     Ok(Tls13HandshakeKeys {
         client_handshake_traffic_secret,
         server_handshake_traffic_secret,
@@ -313,10 +311,6 @@ pub fn derive_application_secrets(
         "TLS13 DEBUG: Deriving application secrets (Phase 2) with {:?}...",
         cipher_suite
     );
-    log::debug!(
-        "  handshake_hash (with Finished): {:?}",
-        &handshake_hash[..8]
-    );
 
     // Client Application Traffic Secret
     let client_application_traffic_secret = derive_secret_with_algorithm(
@@ -326,15 +320,6 @@ pub fn derive_application_secrets(
         handshake_hash,
     )?;
 
-    log::debug!(
-        "  client_app_traffic: {:?}",
-        &client_application_traffic_secret[..8]
-    );
-    log::debug!(
-        "DERIVE_APP_SECRETS: ClientAppSecret(full)={:02x?}",
-        client_application_traffic_secret
-    );
-
     // Server Application Traffic Secret
     let server_application_traffic_secret = derive_secret_with_algorithm(
         hmac_algorithm,
@@ -342,15 +327,6 @@ pub fn derive_application_secrets(
         b"s ap traffic",
         handshake_hash,
     )?;
-
-    log::debug!(
-        "  server_app_traffic: {:?}",
-        &server_application_traffic_secret[..8]
-    );
-    log::debug!(
-        "DERIVE_APP_SECRETS: ServerAppSecret(full)={:02x?}",
-        server_application_traffic_secret
-    );
 
     Ok((
         client_application_traffic_secret,

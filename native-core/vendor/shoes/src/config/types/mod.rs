@@ -28,7 +28,7 @@ pub mod tun;
 #[allow(unused_imports)]
 pub use client::{
     ClientConfig, ClientProxyConfig, GrpcTransportClientConfig, H2MuxConfig,
-    Http2TransportClientConfig, TlsClientConfig, WebsocketClientConfig,
+    Http2TransportClientConfig, TlsClientConfig, TlsFingerprint, WebsocketClientConfig,
 };
 pub use common::DEFAULT_REALITY_SHORT_ID;
 pub use dns::{DnsConfig, DnsConfigGroup, DnsServerSpec, ExpandedDnsGroup, ExpandedDnsSpec};

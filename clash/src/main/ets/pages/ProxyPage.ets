@@ -36,7 +36,6 @@ export struct ProxyPage {
   @State groups: ProxyGroupModel[] = [];
   @State statusMsg: string = '';
   @State sourceMsg: string = '';
-  @State diagnosticMsg: string = '';
   @State testingGroup: string = '';
   @State isLoading: boolean = false;
   private service: IClashService | null = null;
@@ -62,7 +61,6 @@ export struct ProxyPage {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       this.statusMsg = '';
       this.sourceMsg = '';
-      this.diagnosticMsg = '';
       this.loadedFromExtension = false;
       this.selectionService = new ProxySelectionService();
       await this.selectionService.init(context);
@@ -73,7 +71,6 @@ export struct ProxyPage {
         this.applySavedSelections();
         this.statusMsg = '';
         this.sourceMsg = result.source;
-        this.diagnosticMsg = result.detail;
         this.loadedFromExtension = result.fromExtension;
         this.expandLargestGroup();
         return;
@@ -82,11 +79,9 @@ export struct ProxyPage {
       this.groups = [];
       this.statusMsg = 'No proxy groups found. Update the active subscription, then refresh.';
       this.sourceMsg = '';
-      this.diagnosticMsg = result.detail;
     } catch (e) {
       this.statusMsg = `Failed to load proxy groups: ${String(e)}`;
       this.sourceMsg = '';
-      this.diagnosticMsg = '';
       this.groups = [];
       this.loadedFromExtension = false;
     } finally {
@@ -435,13 +430,6 @@ export struct ProxyPage {
             .fontSize(13)
             .fontColor($r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
-          if (this.diagnosticMsg) {
-            Text(this.diagnosticMsg)
-              .fontSize(11)
-              .fontColor($r('app.color.text_secondary'))
-              .textAlign(TextAlign.Center)
-              .copyOption(CopyOptions.LocalDevice)
-          }
         }
         .width('90%')
         .padding(24)

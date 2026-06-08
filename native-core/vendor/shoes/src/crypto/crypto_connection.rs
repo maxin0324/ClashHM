@@ -5,6 +5,9 @@
 
 use std::io::{self, Read, Write};
 
+use crate::fingerprint::{
+    FingerprintTlsClientConnection, feed_fingerprint_client_connection,
+};
 use crate::reality::{
     RealityClientConnection, RealityServerConnection, feed_reality_client_connection,
     feed_reality_server_connection,
@@ -48,6 +51,8 @@ pub enum CryptoConnection {
     RealityServer(RealityServerConnection),
     /// REALITY client-side connection
     RealityClient(RealityClientConnection),
+    /// Fingerprint TLS client-side connection
+    FingerprintClient(FingerprintTlsClientConnection),
 }
 
 impl CryptoConnection {
@@ -71,6 +76,11 @@ impl CryptoConnection {
         CryptoConnection::RealityClient(conn)
     }
 
+    /// Create a new fingerprint TLS client connection
+    pub fn new_fingerprint_client(conn: FingerprintTlsClientConnection) -> Self {
+        CryptoConnection::FingerprintClient(conn)
+    }
+
     /// Check if this is a server-side connection
     pub fn is_server(&self) -> bool {
         matches!(
@@ -83,7 +93,7 @@ impl CryptoConnection {
     pub fn is_client(&self) -> bool {
         matches!(
             self,
-            CryptoConnection::RustlsClient(_) | CryptoConnection::RealityClient(_)
+            CryptoConnection::RustlsClient(_) | CryptoConnection::RealityClient(_) | CryptoConnection::FingerprintClient(_)
         )
     }
 
@@ -99,13 +109,10 @@ impl CryptoConnection {
             // REALITY doesn't have real TLS ALPN negotiation
             CryptoConnection::RealityServer(_) => None,
             CryptoConnection::RealityClient(_) => None,
+            CryptoConnection::FingerprintClient(_) => None,
         }
     }
 
-    /// Check if this is a REALITY connection
-    ///
-    /// REALITY connections have already authenticated the client during
-    /// the handshake, so they can be trusted for protocol handling.
     pub fn is_reality(&self) -> bool {
         matches!(
             self,
@@ -123,13 +130,10 @@ impl CryptoConnection {
             CryptoConnection::RustlsClient(conn) => conn.read_tls(rd),
             CryptoConnection::RealityServer(conn) => conn.read_tls(rd),
             CryptoConnection::RealityClient(conn) => conn.read_tls(rd),
+            CryptoConnection::FingerprintClient(conn) => conn.read_tls(rd),
         }
     }
 
-    /// Process any buffered TLS messages and update internal state
-    ///
-    /// This decrypts data and advances the handshake state machine.
-    /// Returns the I/O state including how many plaintext bytes are available.
     pub fn process_new_packets(&mut self) -> io::Result<CryptoIoState> {
         match self {
             CryptoConnection::RustlsServer(conn) => {
@@ -139,7 +143,6 @@ impl CryptoConnection {
                         format!("rustls server error processing new packets: {:?}", e),
                     )
                 })?;
-
                 Ok(CryptoIoState::new(io_state.plaintext_bytes_to_read()))
             }
             CryptoConnection::RustlsClient(conn) => {
@@ -149,7 +152,6 @@ impl CryptoConnection {
                         format!("rustls client error processing new packets: {:?}", e),
                     )
                 })?;
-
                 Ok(CryptoIoState::new(io_state.plaintext_bytes_to_read()))
             }
             CryptoConnection::RealityServer(conn) => {
@@ -159,7 +161,6 @@ impl CryptoConnection {
                         format!("reality server error processing new packets: {:?}", e),
                     )
                 })?;
-
                 Ok(CryptoIoState::new(io_state.plaintext_bytes_to_read()))
             }
             CryptoConnection::RealityClient(conn) => {
@@ -169,98 +170,87 @@ impl CryptoConnection {
                         format!("reality client error processing new packets: {:?}", e),
                     )
                 })?;
-
+                Ok(CryptoIoState::new(io_state.plaintext_bytes_to_read()))
+            }
+            CryptoConnection::FingerprintClient(conn) => {
+                let io_state = conn.process_new_packets().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("fingerprint client error processing new packets: {:?}", e),
+                    )
+                })?;
                 Ok(CryptoIoState::new(io_state.plaintext_bytes_to_read()))
             }
         }
     }
 
-    /// Get a unified reader for reading decrypted plaintext
-    ///
-    /// Works for both Rustls and REALITY connections.
-    /// Returns a CryptoReader enum that abstracts over rustls::Reader and REALITY's reader.
     pub fn reader(&mut self) -> CryptoReader<'_> {
         match self {
             CryptoConnection::RustlsServer(conn) => CryptoReader::Rustls(conn.reader()),
             CryptoConnection::RustlsClient(conn) => CryptoReader::Rustls(conn.reader()),
             CryptoConnection::RealityServer(conn) => CryptoReader::Reality(conn.reader()),
             CryptoConnection::RealityClient(conn) => CryptoReader::Reality(conn.reader()),
+            CryptoConnection::FingerprintClient(conn) => CryptoReader::Reality(conn.reader()),
         }
     }
 
-    /// Get a unified writer for writing plaintext to be encrypted
-    ///
-    /// Works for both Rustls and REALITY connections.
-    /// Returns a CryptoWriter enum that abstracts over rustls::Writer and REALITY's writer.
     pub fn writer(&mut self) -> CryptoWriter<'_> {
         match self {
             CryptoConnection::RustlsServer(conn) => CryptoWriter::Rustls(conn.writer()),
             CryptoConnection::RustlsClient(conn) => CryptoWriter::Rustls(conn.writer()),
             CryptoConnection::RealityServer(conn) => CryptoWriter::Reality(conn.writer()),
             CryptoConnection::RealityClient(conn) => CryptoWriter::Reality(conn.writer()),
+            CryptoConnection::FingerprintClient(conn) => CryptoWriter::Reality(conn.writer()),
         }
     }
 
-    /// Write any buffered TLS messages to `wr`
-    ///
-    /// This encrypts any pending plaintext and writes the ciphertext.
-    /// Returns the number of bytes written.
     pub fn write_tls(&mut self, wr: &mut dyn Write) -> io::Result<usize> {
         match self {
             CryptoConnection::RustlsServer(conn) => conn.write_tls(wr),
             CryptoConnection::RustlsClient(conn) => conn.write_tls(wr),
             CryptoConnection::RealityServer(conn) => conn.write_tls(wr),
             CryptoConnection::RealityClient(conn) => conn.write_tls(wr),
+            CryptoConnection::FingerprintClient(conn) => conn.write_tls(wr),
         }
     }
 
-    /// Check if the connection wants to write data
-    ///
-    /// If true, the application should call `write_tls()` as soon as possible.
     pub fn wants_write(&self) -> bool {
         match self {
             CryptoConnection::RustlsServer(conn) => conn.wants_write(),
             CryptoConnection::RustlsClient(conn) => conn.wants_write(),
             CryptoConnection::RealityServer(conn) => conn.wants_write(),
             CryptoConnection::RealityClient(conn) => conn.wants_write(),
+            CryptoConnection::FingerprintClient(conn) => conn.wants_write(),
         }
     }
 
-    /// Check if the connection wants to read data
-    ///
-    /// If true, the application should call `read_tls()` as soon as possible.
     pub fn wants_read(&self) -> bool {
         match self {
             CryptoConnection::RustlsServer(conn) => conn.wants_read(),
             CryptoConnection::RustlsClient(conn) => conn.wants_read(),
             CryptoConnection::RealityServer(conn) => conn.wants_read(),
             CryptoConnection::RealityClient(conn) => conn.wants_read(),
+            CryptoConnection::FingerprintClient(conn) => conn.wants_read(),
         }
     }
 
-    /// Check whether the handshake is complete
-    ///
-    /// For both client and server connections, this returns true when
-    /// the handshake has completed and application data can be exchanged.
     pub fn is_handshaking(&self) -> bool {
         match self {
             CryptoConnection::RustlsServer(conn) => conn.is_handshaking(),
             CryptoConnection::RustlsClient(conn) => conn.is_handshaking(),
             CryptoConnection::RealityServer(conn) => conn.is_handshaking(),
             CryptoConnection::RealityClient(conn) => conn.is_handshaking(),
+            CryptoConnection::FingerprintClient(conn) => conn.is_handshaking(),
         }
     }
 
-    /// Queue a close notification
-    ///
-    /// This queues a close notification to be sent to the peer.
-    /// Call `write_tls()` to actually send it.
     pub fn send_close_notify(&mut self) {
         match self {
             CryptoConnection::RustlsServer(conn) => conn.send_close_notify(),
             CryptoConnection::RustlsClient(conn) => conn.send_close_notify(),
             CryptoConnection::RealityServer(conn) => conn.send_close_notify(),
             CryptoConnection::RealityClient(conn) => conn.send_close_notify(),
+            CryptoConnection::FingerprintClient(conn) => conn.send_close_notify(),
         }
     }
 }
@@ -275,6 +265,7 @@ pub fn feed_crypto_connection(
         CryptoConnection::RustlsClient(conn) => feed_rustls_client_connection(conn, data),
         CryptoConnection::RealityServer(conn) => feed_reality_server_connection(conn, data),
         CryptoConnection::RealityClient(conn) => feed_reality_client_connection(conn, data),
+        CryptoConnection::FingerprintClient(conn) => feed_fingerprint_client_connection(conn, data),
     }
 }
 

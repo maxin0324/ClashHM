@@ -25,6 +25,7 @@ use crate::async_stream::AsyncMessageStream;
 use crate::client_proxy_selector::{ClientProxySelector, ConnectDecision};
 use crate::resolver::Resolver;
 
+use super::fake_dns;
 use super::udp_handler::{UdpMessage, UdpReader, UdpWriter};
 
 /// Session timeout - sessions without activity are expired
@@ -52,6 +53,12 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// plain Trojan. Convert DNS/UDP payloads to DNS-over-TCP on the same selected
 /// route so TUN clients can still resolve domains without UDP proxy support.
 const DNS_TCP_TIMEOUT: Duration = Duration::from_secs(10);
+const FAKE_DNS_UPSTREAM_LEARN_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Browser QUIC/HTTP3 over UDP 443 is much easier to fingerprint and can behave
+/// differently from the TCP path. Drop it at the TUN layer so browsers retry
+/// HTTPS over TCP through the normal proxy chain.
+const BLOCK_UDP_443: bool = true;
 
 /// Convert a SocketAddr to a NetLocation.
 fn socket_addr_to_net_location(addr: SocketAddr) -> NetLocation {
@@ -59,7 +66,7 @@ fn socket_addr_to_net_location(addr: SocketAddr) -> NetLocation {
         std::net::IpAddr::V4(v4) => Address::Ipv4(v4),
         std::net::IpAddr::V6(v6) => Address::Ipv6(v6),
     };
-    NetLocation::new(address, addr.port())
+    fake_dns::resolve_fake_location(&NetLocation::new(address, addr.port()))
 }
 
 /// TUN UDP Manager - handles all UDP traffic through the TUN.
@@ -320,7 +327,56 @@ async fn session_task(
                 };
 
                 let dest = socket_addr_to_net_location(dest_addr);
+                super::record_udp_target(&dest);
+                if matches!(dest.address(), Address::Ipv6(_)) && !fake_dns::ipv6_enabled() {
+                    debug!(
+                        "[TunUdpSession {}] Dropping IPv6 UDP packet to {} (ipv6 disabled)",
+                        peer_addr, dest
+                    );
+                    super::record_udp_target(&NetLocation::new(
+                        Address::Hostname(format!("ipv6-drop-{dest}")),
+                        dest.port(),
+                    ));
+                    continue;
+                }
+                if BLOCK_UDP_443 && dest_addr.port() == 443 {
+                    debug!(
+                        "[TunUdpSession {}] Dropping UDP/443 packet to {} to force TCP fallback",
+                        peer_addr, dest_addr
+                    );
+                    continue;
+                }
+
                 if dest_addr.port() == 53 {
+                    if let Some(response) = fake_dns::handle_dns_query(&payload) {
+                        if fake_dns::is_a_query(&payload) {
+                            let learn_payload = payload.clone();
+                            let learn_proxy_selector = proxy_selector.clone();
+                            let learn_resolver = resolver.clone();
+                            let learn_future = dns_query_over_tcp(
+                                dest_addr,
+                                learn_payload,
+                                learn_proxy_selector,
+                                learn_resolver,
+                            );
+                            if let Ok(Ok(upstream_response)) = tokio::time::timeout(
+                                FAKE_DNS_UPSTREAM_LEARN_TIMEOUT,
+                                learn_future,
+                            )
+                            .await
+                            {
+                                fake_dns::learn_ipv4_answers(&upstream_response);
+                            }
+                        }
+                        if response_tx.try_send((response, dest_addr, peer_addr)).is_err() {
+                            debug!(
+                                "[TunUdpSession {}] fake DNS response channel full, dropping response from {}",
+                                peer_addr, dest_addr
+                            );
+                        }
+                        continue;
+                    }
+
                     let response_tx = response_tx.clone();
                     let proxy_selector = proxy_selector.clone();
                     let resolver = resolver.clone();

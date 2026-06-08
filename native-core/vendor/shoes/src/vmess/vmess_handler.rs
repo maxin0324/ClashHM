@@ -693,6 +693,12 @@ struct AeadHeaderReader {
 impl AeadHeaderReader {
     fn read_slice_into(&mut self, data: &mut [u8]) -> std::io::Result<()> {
         let len = data.len();
+        if self.cursor + len > self.decrypted_header.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "VMess header read out of bounds",
+            ));
+        }
         data.copy_from_slice(&self.decrypted_header[self.cursor..self.cursor + len]);
         self.cursor += len;
         Ok(())

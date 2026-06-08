@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use log::{debug, error, warn};
+use subtle::ConstantTimeEq;
 use rand::distr::Alphanumeric;
 use rand::{Rng, RngCore};
 use rustc_hash::FxHashMap;
@@ -172,10 +173,8 @@ fn validate_auth_request<T>(req: http::Request<T>, password: &str) -> std::io::R
     let auth_str = auth_value
         .to_str()
         .map_err(|e| std::io::Error::other(format!("invalid auth header value: {e}")))?;
-    if auth_str != password {
-        return Err(std::io::Error::other(format!(
-            "incorrect auth password: {auth_str}"
-        )));
+    if password.as_bytes().ct_eq(auth_str.as_bytes()).unwrap_u8() == 0 {
+        return Err(std::io::Error::other("incorrect auth password"));
     }
 
     Ok(())

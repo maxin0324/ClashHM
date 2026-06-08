@@ -100,7 +100,9 @@ pub fn derive_auth_key(
     salt: &[u8],
     info: &[u8],
 ) -> Result<[u8; 32], CryptoError> {
-    debug_assert_eq!(salt.len(), 20, "salt must be exactly 20 bytes");
+    if salt.len() != 20 {
+        return Err(CryptoError::InvalidKeyLength);
+    }
     let salt = Salt::new(HKDF_SHA256, salt);
     let prk = salt.extract(shared_secret);
     let info_pieces = [info];
@@ -132,7 +134,9 @@ pub fn encrypt_session_id(
     nonce: &[u8],
     aad: &[u8],
 ) -> Result<[u8; 32], CryptoError> {
-    debug_assert_eq!(nonce.len(), 12, "nonce must be exactly 12 bytes");
+    if nonce.len() != 12 {
+        return Err(CryptoError::InvalidNonceLength);
+    }
     let unbound_key =
         UnboundKey::new(&AES_256_GCM, auth_key).map_err(|_| CryptoError::EncryptionFailed)?;
     let sealing_key = LessSafeKey::new(unbound_key);
@@ -176,7 +180,9 @@ pub fn decrypt_session_id(
     nonce: &[u8],
     aad: &[u8],
 ) -> Result<[u8; 16], CryptoError> {
-    debug_assert_eq!(nonce.len(), 12, "nonce must be exactly 12 bytes");
+    if nonce.len() != 12 {
+        return Err(CryptoError::InvalidNonceLength);
+    }
     let unbound_key =
         UnboundKey::new(&AES_256_GCM, auth_key).map_err(|_| CryptoError::DecryptionFailed)?;
     let opening_key = LessSafeKey::new(unbound_key);

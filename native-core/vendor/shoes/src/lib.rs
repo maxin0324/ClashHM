@@ -65,6 +65,8 @@ mod copy_bidirectional;
 mod copy_bidirectional_message;
 mod crypto;
 pub mod dns;
+mod fingerprint;
+mod fingerprint_tls_client_handler;
 mod h2mux;
 mod http_handler;
 mod hysteria2_client_handler;

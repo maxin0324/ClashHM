@@ -71,6 +71,7 @@ pub fn build_client_proxy_chain(
             } else {
                 // Proxy: socket + proxy paired
                 let proxy = ProxyConnectorImpl::from_config(config.clone(), resolver.clone())
+                    .expect("Failed to create ProxyConnector")
                     .map(|p| Box::new(p) as Box<dyn ProxyConnector>)
                     .expect("Failed to create ProxyConnector for non-direct config");
                 InitialHopEntry::Proxy { socket, proxy }
@@ -98,6 +99,7 @@ pub fn build_client_proxy_chain(
                     }
 
                     ProxyConnectorImpl::from_config(config, resolver.clone())
+                        .expect("Failed to create ProxyConnector")
                         .map(|p| Box::new(p) as Box<dyn ProxyConnector>)
                         .expect("Failed to create ProxyConnector for subsequent hop")
                 })
