@@ -7,10 +7,47 @@ set(NATIVE_CORE_HEADER ${NATIVE_CORE_DIR}/native_core.h)
 set(NATIVE_CORE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native-core)
 option(CLASHHM_AUTO_BUILD_NATIVE_CORE "Build ClashHM Rust native-core when the Rust/OHOS toolchain is available" ON)
 
+function(clashhm_is_lfs_pointer artifact_path result_var)
+    set(is_pointer FALSE)
+    if(EXISTS ${artifact_path})
+        file(READ ${artifact_path} artifact_header LIMIT 64)
+        string(FIND "${artifact_header}" "version https://git-lfs.github.com/spec/v1" lfs_marker_pos)
+        if(lfs_marker_pos EQUAL 0)
+            set(is_pointer TRUE)
+        endif()
+    endif()
+    set(${result_var} ${is_pointer} PARENT_SCOPE)
+endfunction()
+
+function(clashhm_fail_lfs_pointer artifact_path)
+    message(FATAL_ERROR
+        "ClashHM native-core artifact is a Git LFS pointer, not a real binary: ${artifact_path}\n"
+        "Run these commands after cloning the repo:\n"
+        "  git lfs install\n"
+        "  git lfs pull\n"
+        "Then delete the reconstructed archive if it exists:\n"
+        "  rm -f ${NATIVE_CORE_LIB}\n"
+        "and build again.")
+endfunction()
+
+if(EXISTS ${NATIVE_CORE_LIB})
+    clashhm_is_lfs_pointer(${NATIVE_CORE_LIB} CLASHHM_NATIVE_CORE_LIB_IS_LFS_POINTER)
+    if(CLASHHM_NATIVE_CORE_LIB_IS_LFS_POINTER)
+        message(STATUS "ClashHM native-core: removing invalid LFS pointer archive ${NATIVE_CORE_LIB}")
+        file(REMOVE ${NATIVE_CORE_LIB})
+    endif()
+endif()
+
 if(NOT EXISTS ${NATIVE_CORE_LIB})
     file(GLOB NATIVE_CORE_LIB_PARTS "${NATIVE_CORE_LIB}.part*")
     list(SORT NATIVE_CORE_LIB_PARTS)
     if(NATIVE_CORE_LIB_PARTS)
+        foreach(NATIVE_CORE_LIB_PART ${NATIVE_CORE_LIB_PARTS})
+            clashhm_is_lfs_pointer(${NATIVE_CORE_LIB_PART} CLASHHM_NATIVE_CORE_PART_IS_LFS_POINTER)
+            if(CLASHHM_NATIVE_CORE_PART_IS_LFS_POINTER)
+                clashhm_fail_lfs_pointer(${NATIVE_CORE_LIB_PART})
+            endif()
+        endforeach()
         message(STATUS "ClashHM native-core: reconstructing ${NATIVE_CORE_LIB} from split parts")
         execute_process(
             COMMAND ${CMAKE_COMMAND} -E cat ${NATIVE_CORE_LIB_PARTS}
@@ -20,6 +57,10 @@ if(NOT EXISTS ${NATIVE_CORE_LIB})
         )
         if(NOT CLASHHM_NATIVE_CORE_RESTORE_RESULT EQUAL 0)
             message(WARNING "ClashHM native-core split artifact restore failed. ${CLASHHM_NATIVE_CORE_RESTORE_ERROR}")
+        endif()
+        clashhm_is_lfs_pointer(${NATIVE_CORE_LIB} CLASHHM_NATIVE_CORE_LIB_IS_LFS_POINTER)
+        if(CLASHHM_NATIVE_CORE_LIB_IS_LFS_POINTER)
+            clashhm_fail_lfs_pointer(${NATIVE_CORE_LIB})
         endif()
     endif()
 endif()

@@ -3,7 +3,6 @@
     { "name": "module_desc", "value": "ClashHM 模块" },
     { "name": "ClashAbility_desc", "value": "ClashHM 代理客户端" },
     { "name": "ClashAbility_label", "value": "ClashHM" },
-    { "name": "app_name", "value": "ClashHM" },
     { "name": "tab_home", "value": "首页" },
     { "name": "tab_proxy", "value": "代理" },
     { "name": "tab_subscription", "value": "订阅" },

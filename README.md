@@ -124,8 +124,13 @@ These parts are stored with Git LFS, so run this once after a fresh clone:
 ```bash
 git lfs install
 git lfs pull
+rm -f clash/src/main/cpp/native-core/libclashhm_native_core.a
 bash scripts/verify-native-core-artifact.sh
 ```
+
+If DevEco reports `unknown directive: version` while linking
+`libclashhm_native_core.a`, the clone contains Git LFS pointer files instead of
+the real native-core binaries. Run the commands above and rebuild.
 
 ```bash
 # Open in DevEco Studio → Sync → Build HAP → Run on device

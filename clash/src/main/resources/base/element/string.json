@@ -3,7 +3,6 @@
     { "name": "module_desc", "value": "ClashHM Module" },
     { "name": "ClashAbility_desc", "value": "ClashHM Proxy Client" },
     { "name": "ClashAbility_label", "value": "ClashHM" },
-    { "name": "app_name", "value": "ClashHM" },
     { "name": "tab_home", "value": "Home" },
     { "name": "tab_proxy", "value": "Proxy" },
     { "name": "tab_subscription", "value": "Subscribe" },
