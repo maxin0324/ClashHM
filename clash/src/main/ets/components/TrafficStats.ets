@@ -1,6 +1,5 @@
 import { TrafficData, formatSpeed } from '../models/TrafficData';
 import { formatBytes } from '../models/Subscription';
-import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct TrafficStats {
@@ -12,45 +11,12 @@ export struct TrafficStats {
 
   build() {
     Column({ space: 10 }) {
-      Row() {
-        Column({ space: 6 }) {
-          Text($r('app.string.upload'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
+      Row({ space: 10 }) {
+        this.statCard($r('app.string.upload'), formatSpeed(this.uploadSpeed), $r('app.color.upload_color'))
 
-          Text(formatSpeed(this.uploadSpeed))
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.upload_color'))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-
-        Divider()
-          .vertical(true)
-          .height(42)
-          .color($r('app.color.divider'))
-
-        Column({ space: 6 }) {
-          Text($r('app.string.download'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-
-          Text(formatSpeed(this.downloadSpeed))
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.download_color'))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.End)
+        this.statCard($r('app.string.download'), formatSpeed(this.downloadSpeed), $r('app.color.download_color'))
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 16, bottom: 16 })
-      .backgroundColor($r('app.color.surface_glass'))
-      .borderRadius(16)
-      .border({ width: 1, color: $r('app.color.divider') })
-      .shadow({ radius: 16, color: '#10000000', offsetX: 0, offsetY: 8 })
-      .visualEffect(HdsEffects.createCardLight($r('app.color.download_color')))
 
       Row() {
         Column({ space: 2 }) {
@@ -58,8 +24,10 @@ export struct TrafficStats {
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
           Text(`↑ ${formatBytes(this.sessionUpload)}  ↓ ${formatBytes(this.sessionDownload)}`)
-            .fontSize(12)
+            .fontSize(13)
             .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -69,14 +37,43 @@ export struct TrafficStats {
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
           Text(`${this.activeConnections}`)
-            .fontSize(12)
-            .fontColor($r('app.color.text_primary'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.primary'))
         }
         .alignItems(HorizontalAlign.End)
       }
       .width('100%')
-      .padding({ left: 2, right: 2 })
+      .height(58)
+      .padding({ left: 14, right: 14 })
+      .backgroundColor($r('app.color.surface_glass'))
+      .backgroundBlurStyle(BlurStyle.Thin)
+      .borderRadius(14)
+      .border({ width: 1, color: $r('app.color.divider') })
     }
     .width('100%')
+  }
+
+  @Builder
+  private statCard(label: ResourceStr, value: string, color: ResourceColor) {
+    Column({ space: 3 }) {
+      Text(value)
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text(label)
+        .fontSize(11)
+        .fontColor($r('app.color.text_secondary'))
+    }
+    .layoutWeight(1)
+    .height(76)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .borderRadius(16)
+    .border({ width: 1, color: $r('app.color.divider') })
   }
 }

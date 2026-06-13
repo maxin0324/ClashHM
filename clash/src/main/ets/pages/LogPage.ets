@@ -309,7 +309,7 @@ struct LogPage {
           })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 18, bottom: 12 })
+      .padding({ left: 16, right: 16, top: 34, bottom: 12 })
 
       Row() {
         Text($r('app.string.search'))
@@ -335,6 +335,7 @@ struct LogPage {
       .margin({ left: 16, right: 16, bottom: 10 })
       .height(42)
       .backgroundColor($r('app.color.surface_glass'))
+      .backgroundBlurStyle(BlurStyle.Thin)
       .borderRadius(14)
       .border({ width: 1, color: $r('app.color.divider') })
 
@@ -356,6 +357,7 @@ struct LogPage {
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
         .margin({ left: 16, right: 16, bottom: 10 })
         .backgroundColor($r('app.color.surface_glass'))
+        .backgroundBlurStyle(BlurStyle.Thin)
         .borderRadius(14)
         .border({ width: 1, color: $r('app.color.divider') })
       }
@@ -383,6 +385,6 @@ struct LogPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.surface_subtle'))
+    .backgroundColor(Color.Transparent)
   }
 }

@@ -16,12 +16,6 @@ import { common, Want } from '@kit.AbilityKit';
 import { pasteboard, commonEventManager } from '@kit.BasicServicesKit';
 
 import { Logger } from '../common/Logger';
-import { HdsEffects } from '../common/HdsEffects';
-import {
-  HdsSceneController,
-  HdsSceneType,
-  HdsVisualComponent,
-} from '@hms.hds.HdsVisualComponent';
 
 class NativeCoreStatusInfo {
   running: boolean = false;
@@ -58,7 +52,6 @@ export struct HomePage {
   private service: IClashService | null = null;
   private trafficMonitor: TrafficMonitor = new TrafficMonitor();
   private proxySelectionSubscriber: commonEventManager.CommonEventSubscriber | null = null;
-  private homeSceneController: HdsSceneController = HdsEffects.createHomeSceneController();
 
   aboutToAppear(): void {
     try {
@@ -71,7 +64,6 @@ export struct HomePage {
     this.refreshProfileSummary();
     this.refreshExtensionConnectionState();
     this.subscribeProxySelectionChanged();
-    this.homeSceneController.start();
     this.trafficMonitor.setCallback((data: TrafficData) => {
       this.traffic = data;
     });
@@ -80,7 +72,6 @@ export struct HomePage {
   aboutToDisappear(): void {
     this.trafficMonitor.stop();
     this.unsubscribeProxySelectionChanged();
-    this.homeSceneController.stop();
   }
 
   private subscribeProxySelectionChanged(): void {
@@ -669,16 +660,6 @@ export struct HomePage {
 
   build() {
     Stack() {
-      HdsVisualComponent()
-        .width('100%')
-        .height('100%')
-        .scene(
-          HdsSceneType.DUAL_EDGE_FLOW_LIGHT_WITH_BACKGROUND_MASK,
-          this.homeSceneController,
-          undefined,
-          HdsEffects.createSceneFrameRate()
-        )
-
       Column() {
         Row() {
         Image($r('app.media.app_logo'))
@@ -714,9 +695,9 @@ export struct HomePage {
           })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 22, bottom: 12 })
+      .padding({ left: 20, right: 20, top: 36, bottom: 12 })
 
-      Column({ space: 18 }) {
+      Column({ space: 14 }) {
         ConnectButton({
           state: this.connectState,
           onTap: () => {
@@ -852,13 +833,13 @@ export struct HomePage {
         .width('100%')
       }
       .width('100%')
-      .padding(18)
+      .padding(16)
       .backgroundColor($r('app.color.surface_glass'))
+      .backgroundBlurStyle(BlurStyle.Thin)
       .borderRadius(18)
       .border({ width: 1, color: $r('app.color.divider') })
       .shadow({ radius: 22, color: '#18000000', offsetX: 0, offsetY: 10 })
-      .visualEffect(HdsEffects.createCardLight($r('app.color.primary')))
-      .margin({ left: 16, right: 16, bottom: 14 })
+      .margin({ left: 16, right: 16, bottom: 10 })
 
       TrafficStats({
         uploadSpeed: this.traffic.uploadSpeed,
@@ -878,7 +859,7 @@ export struct HomePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor(Color.Transparent)
     .onAppear(() => {
       this.refreshProfileSummary();
     })

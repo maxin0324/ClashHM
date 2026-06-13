@@ -418,7 +418,7 @@ export struct ProxyPage {
           })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 18, bottom: 12 })
+      .padding({ left: 20, right: 20, top: 34, bottom: 12 })
 
       if (this.statusMsg) {
         Column({ space: 10 }) {
@@ -434,6 +434,7 @@ export struct ProxyPage {
         .width('90%')
         .padding(24)
         .backgroundColor($r('app.color.surface_glass'))
+        .backgroundBlurStyle(BlurStyle.Thin)
         .borderRadius(18)
         .border({ width: 1, color: $r('app.color.divider') })
         .layoutWeight(1)
@@ -465,7 +466,7 @@ export struct ProxyPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.surface_subtle'))
+    .backgroundColor(Color.Transparent)
     .alignItems(HorizontalAlign.Center)
   }
 }

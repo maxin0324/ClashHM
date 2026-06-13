@@ -173,7 +173,7 @@ export struct SubscriptionPage {
           })
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 18, bottom: 12 })
+        .padding({ left: 20, right: 20, top: 34, bottom: 12 })
 
         if (this.subscriptions.length === 0) {
           Column({ space: 12 }) {
@@ -201,6 +201,7 @@ export struct SubscriptionPage {
           .width('90%')
           .padding(24)
           .backgroundColor($r('app.color.surface_glass'))
+          .backgroundBlurStyle(BlurStyle.Thin)
           .borderRadius(18)
           .border({ width: 1, color: $r('app.color.divider') })
           .layoutWeight(1)
@@ -247,7 +248,7 @@ export struct SubscriptionPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor($r('app.color.surface_subtle'))
+      .backgroundColor(Color.Transparent)
       .alignItems(HorizontalAlign.Center)
 
       // Add/Edit dialog
@@ -326,6 +327,7 @@ export struct SubscriptionPage {
           .width('90%')
           .padding(24)
           .backgroundColor($r('app.color.surface_glass'))
+          .backgroundBlurStyle(BlurStyle.Thin)
           .borderRadius(18)
           .border({ width: 1, color: $r('app.color.divider') })
           .shadow({ radius: 20, color: '#22000000', offsetX: 0, offsetY: 6 })

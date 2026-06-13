@@ -10,18 +10,32 @@ const TAG = 'ClashHM';
 export default class ClashAbility extends UIAbility {
   private cleanupStarted: boolean = false;
 
+  private describeError(err: Error | Object | string | null | undefined): string {
+    if (err === null || err === undefined) {
+      return '';
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return String(err);
+  }
+
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     } catch (err) {
-      hilog.error(DOMAIN, TAG, 'Failed to set colorMode: %{public}s', JSON.stringify(err));
+      hilog.error(DOMAIN, TAG, 'Failed to set colorMode: %{public}s', this.describeError(err));
     }
     hilog.info(DOMAIN, TAG, 'ClashAbility onCreate');
   }
 
   async onDestroy(): Promise<void> {
     hilog.info(DOMAIN, TAG, 'ClashAbility onDestroy');
-    await this.cleanupRuntime('destroy');
+    try {
+      await this.cleanupRuntime('destroy');
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'ClashAbility cleanup failed: %{public}s', this.describeError(err));
+    }
   }
 
   private async cleanupRuntime(reason: string): Promise<void> {
@@ -33,9 +47,7 @@ export default class ClashAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'ClashAbility cleanup started, reason=%{public}s', reason);
     try {
       const service = getClashService();
-      await service.stop().catch((_e: Error) => {
-        // service may already be stopped
-      });
+      await service.stop();
     } catch (_e) {
       // service not initialized or engine not running
     }
@@ -46,11 +58,17 @@ export default class ClashAbility extends UIAbility {
         moduleName: 'clash',
         abilityName: 'ClashVpnAbility',
       };
-      await vpnExtension.stopVpnExtensionAbility(want).catch((_e: Error) => {
-        // vpn may not be running
-      });
+      await vpnExtension.stopVpnExtensionAbility(want);
     } catch (_e) {
       // vpn may not be running
+    }
+  }
+
+  private cleanupRuntimeLater(reason: string): void {
+    try {
+      this.cleanupRuntime(reason);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'ClashAbility cleanup schedule failed: %{public}s', this.describeError(err));
     }
   }
 
@@ -60,7 +78,7 @@ export default class ClashAbility extends UIAbility {
     try {
       windowStage.getMainWindow((err, mainWindow) => {
         if (err.code) {
-          hilog.warn(DOMAIN, TAG, 'Failed to get main window: %{public}s', JSON.stringify(err));
+          hilog.warn(DOMAIN, TAG, 'Failed to get main window: %{public}s', this.describeError(err));
           return;
         }
         try {
@@ -71,35 +89,35 @@ export default class ClashAbility extends UIAbility {
             statusBarContentColor: '#000000',
             navigationBarContentColor: '#000000',
           });
-        } catch (e) {
-          hilog.warn(DOMAIN, TAG, 'Immersive window setup skipped: %{public}s', JSON.stringify(e));
+        } catch (err) {
+          hilog.warn(DOMAIN, TAG, 'Immersive window setup skipped: %{public}s', this.describeError(err));
         }
       });
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'Immersive window setup unavailable: %{public}s', JSON.stringify(e));
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'Immersive window setup unavailable: %{public}s', this.describeError(err));
     }
 
-    windowStage.loadContent('pages/Index', (err) => {
-      if (err.code) {
-        hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(err));
-        return;
-      }
-      hilog.info(DOMAIN, TAG, 'Content loaded successfully');
-    });
+    try {
+      windowStage.loadContent('pages/Index', (err) => {
+        if (err.code) {
+          hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', this.describeError(err));
+          return;
+        }
+        hilog.info(DOMAIN, TAG, 'Content loaded successfully');
+      });
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'Failed to start content load: %{public}s', this.describeError(err));
+    }
   }
 
   onWindowStageWillDestroy(_windowStage: window.WindowStage): void {
     hilog.info(DOMAIN, TAG, 'ClashAbility onWindowStageWillDestroy');
-    this.cleanupRuntime('windowStageWillDestroy').catch((_e: Error) => {
-      // cleanup may already be in progress
-    });
+    this.cleanupRuntimeLater('windowStageWillDestroy');
   }
 
   onWindowStageDestroy(): void {
     hilog.info(DOMAIN, TAG, 'ClashAbility onWindowStageDestroy');
-    this.cleanupRuntime('windowStageDestroy').catch((_e: Error) => {
-      // cleanup may already be in progress
-    });
+    this.cleanupRuntimeLater('windowStageDestroy');
   }
 
   onForeground(): void {

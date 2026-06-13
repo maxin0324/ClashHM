@@ -1,6 +1,5 @@
 import { ProxyGroup } from '../models/ClashConfig';
 import { ProxyNodeItem } from './ProxyNodeItem';
-import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct ProxyGroupCard {
@@ -117,10 +116,10 @@ export struct ProxyGroupCard {
     }
     .width('100%')
     .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(16)
     .border({ width: 1, color: $r('app.color.divider') })
     .shadow({ radius: 12, color: '#0D000000', offsetX: 0, offsetY: 6 })
-    .visualEffect(HdsEffects.createCardLight($r('app.color.primary')))
   }
 
   private getAdditionalOptions(): string[] {

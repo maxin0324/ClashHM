@@ -9,7 +9,15 @@ export struct SettingsPage {
   private settingsService: SettingsService = new SettingsService();
 
   aboutToAppear(): void {
-    this.loadSettings();
+    this.loadSettingsFromUi();
+  }
+
+  private loadSettingsFromUi(): void {
+    this.loadSettings().catch((err: Error) => {
+      console.error(`Failed to load settings: ${err.message}`);
+      this.settings = createDefaultSettings();
+      this.isLoaded = true;
+    });
   }
 
   private async loadSettings(): Promise<void> {
@@ -22,6 +30,12 @@ export struct SettingsPage {
   private async updateSetting(key: string, value: string | boolean | number): Promise<void> {
     await this.settingsService.update(key, value);
     this.settings = this.settingsService.getSettings();
+  }
+
+  private updateSettingFromUi(key: string, value: string | boolean | number): void {
+    this.updateSetting(key, value).catch((err: Error) => {
+      console.error(`Failed to update setting ${key}: ${err.message}`);
+    });
   }
 
   build() {
@@ -39,7 +53,7 @@ export struct SettingsPage {
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 18, bottom: 12 })
+      .padding({ left: 20, right: 20, top: 34, bottom: 12 })
 
       List({ space: 0 }) {
         ListItem() {
@@ -48,25 +62,25 @@ export struct SettingsPage {
 
         ListItem() {
           this.toggleItem($r('app.string.settings_tun'), this.settings.tunMode, (val: boolean) => {
-            this.updateSetting('tunMode', val);
+            this.updateSettingFromUi('tunMode', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.settings_dns'), this.settings.dnsMode, ['fake-ip', 'redir-host'], (val: string) => {
-            this.updateSetting('dnsMode', val);
+            this.updateSettingFromUi('dnsMode', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.settings_log_level'), this.settings.logLevel, ['silent', 'error', 'warning', 'info', 'debug'], (val: string) => {
-            this.updateSetting('logLevel', val);
+            this.updateSettingFromUi('logLevel', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.tls_client'), this.settings.tlsClientMode, ['chrome', 'rustls'], (val: string) => {
-            this.updateSetting('tlsClientMode', val);
+            this.updateSettingFromUi('tlsClientMode', val);
           })
         }
 
@@ -80,13 +94,13 @@ export struct SettingsPage {
 
         ListItem() {
           this.toggleItem($r('app.string.settings_allow_lan'), this.settings.allowLan, (val: boolean) => {
-            this.updateSetting('allowLan', val);
+            this.updateSettingFromUi('allowLan', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.settings_routing'), this.settings.routingMode, ['rule', 'global', 'direct'], (val: string) => {
-            this.updateSetting('routingMode', val);
+            this.updateSettingFromUi('routingMode', val);
           })
         }
 
@@ -96,19 +110,19 @@ export struct SettingsPage {
 
         ListItem() {
           this.toggleItem($r('app.string.settings_auto_start'), this.settings.autoStart, (val: boolean) => {
-            this.updateSetting('autoStart', val);
+            this.updateSettingFromUi('autoStart', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.settings_theme'), this.settings.theme, ['system', 'light', 'dark'], (val: string) => {
-            this.updateSetting('theme', val);
+            this.updateSettingFromUi('theme', val);
           })
         }
 
         ListItem() {
           this.selectorItem($r('app.string.settings_language'), this.settings.language, ['system', 'zh_CN', 'en_US'], (val: string) => {
-            this.updateSetting('language', val);
+            this.updateSettingFromUi('language', val);
           })
         }
 
@@ -136,7 +150,7 @@ export struct SettingsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.surface_subtle'))
+    .backgroundColor(Color.Transparent)
   }
 
   @Builder
@@ -150,7 +164,7 @@ export struct SettingsPage {
   }
 
   @Builder
-  toggleItem(title: Resource, value: boolean, onChange: (val: boolean) => void) {
+  toggleItem(title: ResourceStr, value: boolean, onChange: (val: boolean) => void) {
     Row() {
       Text(title)
         .fontSize(15)
@@ -167,6 +181,7 @@ export struct SettingsPage {
     .height(54)
     .padding({ left: 16, right: 16 })
     .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }
@@ -179,7 +194,9 @@ export struct SettingsPage {
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
 
-      Select(options.map((opt: string): SelectOption => { return { value: opt } as SelectOption; }))
+      Select(options.map((opt: string): SelectOption => {
+        return { value: opt } as SelectOption;
+      }))
         .value(current)
         .font({ size: 14 })
         .fontColor($r('app.color.text_secondary'))
@@ -193,6 +210,7 @@ export struct SettingsPage {
     .height(54)
     .padding({ left: 16, right: 8 })
     .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }
@@ -213,6 +231,7 @@ export struct SettingsPage {
     .height(54)
     .padding({ left: 16, right: 16 })
     .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }

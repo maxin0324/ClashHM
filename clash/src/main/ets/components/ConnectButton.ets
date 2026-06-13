@@ -1,5 +1,4 @@
 import { ConnectState } from '../models/ClashConfig';
-import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct ConnectButton {
@@ -93,7 +92,6 @@ export struct ConnectButton {
           .backgroundColor(this.getCircleColor())
           .opacity(this.state === ConnectState.CONNECTING ? 0.84 : 1)
           .shadow({ radius: 24, color: '#26000000', offsetX: 0, offsetY: 12 })
-          .visualEffect(HdsEffects.createButtonLight(this.getCircleColor()))
 
         Circle()
           .width(92)

@@ -1,5 +1,4 @@
 import { Subscription, formatBytes, formatTimestamp } from '../models/Subscription';
-import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct SubscriptionCard {
@@ -149,10 +148,10 @@ export struct SubscriptionCard {
     .width('100%')
     .padding(16)
     .backgroundColor($r('app.color.surface_glass'))
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(16)
     .border({ width: 1, color: this.isActive ? $r('app.color.primary') : $r('app.color.divider') })
     .shadow({ radius: 12, color: '#0D000000', offsetX: 0, offsetY: 6 })
-    .visualEffect(HdsEffects.createCardLight(this.isActive ? $r('app.color.primary') : $r('app.color.light_beam')))
     .onClick(() => this.onTap())
   }
 }
