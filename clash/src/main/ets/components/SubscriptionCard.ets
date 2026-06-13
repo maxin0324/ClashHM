@@ -1,4 +1,5 @@
 import { Subscription, formatBytes, formatTimestamp } from '../models/Subscription';
+import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct SubscriptionCard {
@@ -119,8 +120,8 @@ export struct SubscriptionCard {
           .width(64)
           .fontSize(12)
           .fontColor($r('app.color.primary'))
-          .backgroundColor($r('app.color.page_bg'))
-          .borderRadius(7)
+          .backgroundColor($r('app.color.surface_subtle'))
+          .borderRadius(9)
           .onClick(() => this.onUpdate())
 
         Button($r('app.string.edit'))
@@ -129,8 +130,8 @@ export struct SubscriptionCard {
           .width(52)
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
-          .backgroundColor($r('app.color.page_bg'))
-          .borderRadius(7)
+          .backgroundColor($r('app.color.surface_subtle'))
+          .borderRadius(9)
           .onClick(() => this.onEdit())
 
         Button($r('app.string.delete'))
@@ -139,17 +140,19 @@ export struct SubscriptionCard {
           .width(60)
           .fontSize(12)
           .fontColor($r('app.color.error_color'))
-          .backgroundColor($r('app.color.page_bg'))
-          .borderRadius(7)
+          .backgroundColor($r('app.color.surface_subtle'))
+          .borderRadius(9)
           .onClick(() => this.onDelete())
       }
       .width('100%')
     }
     .width('100%')
     .padding(16)
-    .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(8)
+    .backgroundColor($r('app.color.surface_glass'))
+    .borderRadius(16)
     .border({ width: 1, color: this.isActive ? $r('app.color.primary') : $r('app.color.divider') })
+    .shadow({ radius: 12, color: '#0D000000', offsetX: 0, offsetY: 6 })
+    .visualEffect(HdsEffects.createCardLight(this.isActive ? $r('app.color.primary') : $r('app.color.light_beam')))
     .onClick(() => this.onTap())
   }
 }

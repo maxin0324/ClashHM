@@ -1,5 +1,6 @@
 import { TrafficData, formatSpeed } from '../models/TrafficData';
 import { formatBytes } from '../models/Subscription';
+import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct TrafficStats {
@@ -45,9 +46,11 @@ export struct TrafficStats {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 16, bottom: 16 })
-      .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(8)
+      .backgroundColor($r('app.color.surface_glass'))
+      .borderRadius(16)
       .border({ width: 1, color: $r('app.color.divider') })
+      .shadow({ radius: 16, color: '#10000000', offsetX: 0, offsetY: 8 })
+      .visualEffect(HdsEffects.createCardLight($r('app.color.download_color')))
 
       Row() {
         Column({ space: 2 }) {

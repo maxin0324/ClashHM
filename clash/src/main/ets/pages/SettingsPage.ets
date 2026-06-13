@@ -136,7 +136,7 @@ export struct SettingsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor($r('app.color.surface_subtle'))
   }
 
   @Builder
@@ -166,8 +166,8 @@ export struct SettingsPage {
     .width('100%')
     .height(54)
     .padding({ left: 16, right: 16 })
-    .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(8)
+    .backgroundColor($r('app.color.surface_glass'))
+    .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
@@ -192,8 +192,8 @@ export struct SettingsPage {
     .width('100%')
     .height(54)
     .padding({ left: 16, right: 8 })
-    .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(8)
+    .backgroundColor($r('app.color.surface_glass'))
+    .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
@@ -212,8 +212,8 @@ export struct SettingsPage {
     .width('100%')
     .height(54)
     .padding({ left: 16, right: 16 })
-    .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(8)
+    .backgroundColor($r('app.color.surface_glass'))
+    .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
   }
 }

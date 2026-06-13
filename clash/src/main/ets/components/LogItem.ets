@@ -1,5 +1,6 @@
 import { LogEntry, LogType } from '../models/LogEntry';
 import { formatBytes } from '../models/Subscription';
+import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct LogItem {
@@ -85,9 +86,10 @@ export struct LogItem {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor($r('app.color.card_bg'))
-    .borderRadius(8)
+    .backgroundColor($r('app.color.surface_glass'))
+    .borderRadius(14)
     .border({ width: 1, color: $r('app.color.divider') })
+    .visualEffect(HdsEffects.createCardLight(this.getTypeColor()))
   }
 }
 

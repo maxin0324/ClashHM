@@ -57,6 +57,28 @@ export default class ClashAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(DOMAIN, TAG, 'ClashAbility onWindowStageCreate');
 
+    try {
+      windowStage.getMainWindow((err, mainWindow) => {
+        if (err.code) {
+          hilog.warn(DOMAIN, TAG, 'Failed to get main window: %{public}s', JSON.stringify(err));
+          return;
+        }
+        try {
+          mainWindow.setWindowLayoutFullScreen(true);
+          mainWindow.setWindowSystemBarProperties({
+            statusBarColor: '#00000000',
+            navigationBarColor: '#00000000',
+            statusBarContentColor: '#000000',
+            navigationBarContentColor: '#000000',
+          });
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'Immersive window setup skipped: %{public}s', JSON.stringify(e));
+        }
+      });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'Immersive window setup unavailable: %{public}s', JSON.stringify(e));
+    }
+
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(err));

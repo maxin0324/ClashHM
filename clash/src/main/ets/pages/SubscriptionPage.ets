@@ -165,7 +165,7 @@ export struct SubscriptionPage {
           }
           .height(34)
           .backgroundColor($r('app.color.primary'))
-          .borderRadius(8)
+          .borderRadius(11)
           .padding({ left: 14, right: 14 })
           .margin({ left: 10 })
           .onClick(() => {
@@ -191,8 +191,8 @@ export struct SubscriptionPage {
               .height(38)
               .fontSize(14)
               .fontColor(Color.White)
-              .backgroundColor($r('app.color.primary'))
-              .borderRadius(8)
+          .backgroundColor($r('app.color.primary'))
+              .borderRadius(11)
               .padding({ left: 18, right: 18 })
               .onClick(() => {
                 this.showAddSubscriptionDialog();
@@ -200,8 +200,8 @@ export struct SubscriptionPage {
           }
           .width('90%')
           .padding(24)
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(18)
           .border({ width: 1, color: $r('app.color.divider') })
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
@@ -247,7 +247,7 @@ export struct SubscriptionPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor($r('app.color.page_bg'))
+      .backgroundColor($r('app.color.surface_subtle'))
       .alignItems(HorizontalAlign.Center)
 
       // Add/Edit dialog
@@ -266,8 +266,8 @@ export struct SubscriptionPage {
                 .alignSelf(ItemAlign.Start)
               TextInput({ placeholder: $r('app.string.my_subscription'), text: this.dialogName })
                 .height(44)
-                .borderRadius(8)
-                .backgroundColor($r('app.color.page_bg'))
+                .borderRadius(11)
+                .backgroundColor($r('app.color.surface_subtle'))
                 .onChange((value: string) => {
                   this.dialogName = value;
                 })
@@ -280,8 +280,8 @@ export struct SubscriptionPage {
                 .alignSelf(ItemAlign.Start)
               TextInput({ placeholder: 'https://...', text: this.dialogUrl })
                 .height(44)
-                .borderRadius(8)
-                .backgroundColor($r('app.color.page_bg'))
+                .borderRadius(11)
+                .backgroundColor($r('app.color.surface_subtle'))
                 .type(InputType.URL)
                 .onChange((value: string) => {
                   this.dialogUrl = value;
@@ -302,8 +302,8 @@ export struct SubscriptionPage {
                 .height(44)
                 .fontSize(16)
                 .fontColor($r('app.color.text_primary'))
-                .backgroundColor($r('app.color.page_bg'))
-                .borderRadius(8)
+                .backgroundColor($r('app.color.surface_subtle'))
+                .borderRadius(11)
                 .onClick(() => {
                   this.showAddDialog = false;
                 })
@@ -315,7 +315,7 @@ export struct SubscriptionPage {
                 .fontSize(16)
                 .fontColor(Color.White)
                 .backgroundColor($r('app.color.primary'))
-                .borderRadius(8)
+                .borderRadius(11)
                 .enabled(!this.isLoading)
                 .onClick(() => {
                   this.confirmAdd();
@@ -325,8 +325,8 @@ export struct SubscriptionPage {
           }
           .width('90%')
           .padding(24)
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(18)
           .border({ width: 1, color: $r('app.color.divider') })
           .shadow({ radius: 20, color: '#22000000', offsetX: 0, offsetY: 6 })
         }

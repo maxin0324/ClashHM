@@ -8,6 +8,7 @@ import { setClashService } from '../services/ClashService';
 import { common } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { Logger } from '../common/Logger';
+import { HdsEffects } from '../common/HdsEffects';
 
 @Entry
 @Component
@@ -19,7 +20,6 @@ struct Index {
   @State copyStatus: string = '';
   private tabsController: TabsController = new TabsController();
   private tabTitles: Resource[] = [$r('app.string.tab_home'), $r('app.string.tab_proxy'), $r('app.string.tab_subscription'), $r('app.string.tab_settings')];
-  private tabIcons: string[] = ['⌂', '⇄', '☰', '⋯'];
 
   aboutToAppear(): void {
     try {
@@ -55,24 +55,99 @@ struct Index {
     }
   }
 
+  private isCurrentTab(index: number): boolean {
+    return this.currentIndex === index;
+  }
+
+  private getTabColor(index: number): ResourceColor {
+    return this.isCurrentTab(index) ? $r('app.color.primary') : $r('app.color.text_secondary');
+  }
+
   @Builder
-  tabBuilder(title: ResourceStr, icon: string, index: number) {
-    Column({ space: 2 }) {
-      Text(icon)
-        .width(34)
-        .height(24)
-        .fontSize(index === 0 ? 19 : 20)
-        .lineHeight(24)
-        .fontWeight(this.currentIndex === index ? FontWeight.Bold : FontWeight.Medium)
-        .fontColor(this.currentIndex === index ? $r('app.color.primary') : $r('app.color.text_secondary'))
-        .textAlign(TextAlign.Center)
+  tabIcon(index: number) {
+    Stack() {
+      if (index === 0) {
+        Column({ space: 2 }) {
+          Row()
+            .width(18)
+            .height(7)
+            .borderRadius(3)
+            .backgroundColor(this.getTabColor(index))
+          Row()
+            .width(14)
+            .height(11)
+            .borderRadius(3)
+            .backgroundColor(this.getTabColor(index))
+        }
+        .alignItems(HorizontalAlign.Center)
+      } else if (index === 1) {
+        Stack() {
+          Row()
+            .width(24)
+            .height(3)
+            .borderRadius(2)
+            .backgroundColor(this.getTabColor(index))
+          Row() {
+            Circle()
+              .width(9)
+              .height(9)
+              .fill(this.getTabColor(index))
+            Blank()
+            Circle()
+              .width(9)
+              .height(9)
+              .fill(this.getTabColor(index))
+          }
+          .width(28)
+        }
+      } else if (index === 2) {
+        Column({ space: 4 }) {
+          Row()
+            .width(22)
+            .height(4)
+            .borderRadius(2)
+            .backgroundColor(this.getTabColor(index))
+          Row()
+            .width(18)
+            .height(4)
+            .borderRadius(2)
+            .backgroundColor(this.getTabColor(index))
+          Row()
+            .width(22)
+            .height(4)
+            .borderRadius(2)
+            .backgroundColor(this.getTabColor(index))
+        }
+        .alignItems(HorizontalAlign.Center)
+      } else {
+        Stack() {
+          Circle()
+            .width(22)
+            .height(22)
+            .fill(this.getTabColor(index))
+          Circle()
+            .width(8)
+            .height(8)
+            .fill($r('app.color.nav_bg'))
+        }
+      }
+    }
+    .width(34)
+    .height(24)
+    .alignContent(Alignment.Center)
+  }
+
+  @Builder
+  tabBuilder(title: ResourceStr, index: number) {
+    Column({ space: 3 }) {
+      this.tabIcon(index)
       Text(title)
         .width('100%')
         .height(14)
         .fontSize(10)
         .lineHeight(14)
-        .fontWeight(this.currentIndex === index ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.currentIndex === index ? $r('app.color.primary') : $r('app.color.text_secondary'))
+        .fontWeight(this.isCurrentTab(index) ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.getTabColor(index))
         .textAlign(TextAlign.Center)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -81,6 +156,9 @@ struct Index {
     .height(56)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
+    .backgroundColor(this.isCurrentTab(index) ? $r('app.color.surface_tint') : Color.Transparent)
+    .borderRadius(16)
+    .visualEffect(HdsEffects.createCardLight(this.getTabColor(index)))
     .onClick(() => {
       this.currentIndex = index;
       this.tabsController.changeIndex(index);
@@ -162,25 +240,30 @@ struct Index {
         TabContent() {
           HomePage()
         }
-        .tabBar(this.tabBuilder(this.tabTitles[0], this.tabIcons[0], 0))
+        .tabBar(this.tabBuilder(this.tabTitles[0], 0))
 
         TabContent() {
           ProxyPage()
         }
-        .tabBar(this.tabBuilder(this.tabTitles[1], this.tabIcons[1], 1))
+        .tabBar(this.tabBuilder(this.tabTitles[1], 1))
 
         TabContent() {
           SubscriptionPage()
         }
-        .tabBar(this.tabBuilder(this.tabTitles[2], this.tabIcons[2], 2))
+        .tabBar(this.tabBuilder(this.tabTitles[2], 2))
 
         TabContent() {
           SettingsPage()
         }
-        .tabBar(this.tabBuilder(this.tabTitles[3], this.tabIcons[3], 3))
+        .tabBar(this.tabBuilder(this.tabTitles[3], 3))
       }
       .scrollable(false)
-      .barHeight(64)
+      .barHeight(70)
+      .barOverlap(true)
+      .divider(null)
+      .barBackgroundColor($r('app.color.nav_bg'))
+      .barBackgroundBlurStyle(BlurStyle.Regular)
+      .backgroundColor($r('app.color.page_bg'))
       .layoutWeight(1)
       .onChange((index: number) => {
         this.currentIndex = index;

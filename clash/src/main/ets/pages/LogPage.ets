@@ -246,8 +246,8 @@ struct LogPage {
           .height(34)
           .fontSize(13)
           .fontColor($r('app.color.text_primary'))
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(11)
           .border({ width: 1, color: $r('app.color.divider') })
           .padding({ left: 12, right: 12 })
           .onClick(() => {
@@ -286,8 +286,8 @@ struct LogPage {
           .height(34)
           .fontSize(12)
           .fontColor($r('app.color.primary'))
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(11)
           .border({ width: 1, color: $r('app.color.divider') })
           .padding({ left: 12, right: 12 })
           .onClick(() => {
@@ -300,8 +300,8 @@ struct LogPage {
           .height(34)
           .fontSize(12)
           .fontColor($r('app.color.error_color'))
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(11)
           .border({ width: 1, color: $r('app.color.divider') })
           .padding({ left: 12, right: 12 })
           .onClick(() => {
@@ -334,8 +334,8 @@ struct LogPage {
       .padding({ left: 12, right: 12 })
       .margin({ left: 16, right: 16, bottom: 10 })
       .height(42)
-      .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(8)
+      .backgroundColor($r('app.color.surface_glass'))
+      .borderRadius(14)
       .border({ width: 1, color: $r('app.color.divider') })
 
       if (this.diagnosticText) {
@@ -355,8 +355,8 @@ struct LogPage {
         .width('100%')
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
         .margin({ left: 16, right: 16, bottom: 10 })
-        .backgroundColor($r('app.color.card_bg'))
-        .borderRadius(8)
+        .backgroundColor($r('app.color.surface_glass'))
+        .borderRadius(14)
         .border({ width: 1, color: $r('app.color.divider') })
       }
 
@@ -383,6 +383,6 @@ struct LogPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor($r('app.color.surface_subtle'))
   }
 }

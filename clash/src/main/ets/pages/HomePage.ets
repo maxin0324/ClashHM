@@ -16,6 +16,12 @@ import { common, Want } from '@kit.AbilityKit';
 import { pasteboard, commonEventManager } from '@kit.BasicServicesKit';
 
 import { Logger } from '../common/Logger';
+import { HdsEffects } from '../common/HdsEffects';
+import {
+  HdsSceneController,
+  HdsSceneType,
+  HdsVisualComponent,
+} from '@hms.hds.HdsVisualComponent';
 
 class NativeCoreStatusInfo {
   running: boolean = false;
@@ -52,6 +58,7 @@ export struct HomePage {
   private service: IClashService | null = null;
   private trafficMonitor: TrafficMonitor = new TrafficMonitor();
   private proxySelectionSubscriber: commonEventManager.CommonEventSubscriber | null = null;
+  private homeSceneController: HdsSceneController = HdsEffects.createHomeSceneController();
 
   aboutToAppear(): void {
     try {
@@ -64,6 +71,7 @@ export struct HomePage {
     this.refreshProfileSummary();
     this.refreshExtensionConnectionState();
     this.subscribeProxySelectionChanged();
+    this.homeSceneController.start();
     this.trafficMonitor.setCallback((data: TrafficData) => {
       this.traffic = data;
     });
@@ -72,6 +80,7 @@ export struct HomePage {
   aboutToDisappear(): void {
     this.trafficMonitor.stop();
     this.unsubscribeProxySelectionChanged();
+    this.homeSceneController.stop();
   }
 
   private subscribeProxySelectionChanged(): void {
@@ -659,8 +668,19 @@ export struct HomePage {
   }
 
   build() {
-    Column() {
-      Row() {
+    Stack() {
+      HdsVisualComponent()
+        .width('100%')
+        .height('100%')
+        .scene(
+          HdsSceneType.DUAL_EDGE_FLOW_LIGHT_WITH_BACKGROUND_MASK,
+          this.homeSceneController,
+          undefined,
+          HdsEffects.createSceneFrameRate()
+        )
+
+      Column() {
+        Row() {
         Image($r('app.media.app_logo'))
           .width(42)
           .height(42)
@@ -694,7 +714,7 @@ export struct HomePage {
           })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 18, bottom: 12 })
+      .padding({ left: 20, right: 20, top: 22, bottom: 12 })
 
       Column({ space: 18 }) {
         ConnectButton({
@@ -731,8 +751,9 @@ export struct HomePage {
         }
         .width('100%')
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .backgroundColor($r('app.color.page_bg'))
-        .borderRadius(8)
+        .backgroundColor($r('app.color.surface_subtle'))
+        .borderRadius(12)
+        .border({ width: 1, color: $r('app.color.divider') })
 
         if (this.errorMsg) {
           Column({ space: 8 }) {
@@ -799,8 +820,8 @@ export struct HomePage {
           }
             .width('100%')
             .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .backgroundColor($r('app.color.page_bg'))
-            .borderRadius(8)
+            .backgroundColor($r('app.color.surface_subtle'))
+            .borderRadius(12)
         }
 
         Row({ space: 8 }) {
@@ -819,8 +840,8 @@ export struct HomePage {
                 .layoutWeight(1)
                 .height(34)
                 .padding({ top: 8 })
-                .backgroundColor(this.currentMode === item.mode ? $r('app.color.primary') : $r('app.color.page_bg'))
-                .borderRadius(7)
+                .backgroundColor(this.currentMode === item.mode ? $r('app.color.primary') : $r('app.color.surface_subtle'))
+                .borderRadius(10)
                 .onClick(() => {
                   this.switchMode(item.mode as ConnectionMode);
                 })
@@ -832,9 +853,11 @@ export struct HomePage {
       }
       .width('100%')
       .padding(18)
-      .backgroundColor($r('app.color.card_bg'))
-      .borderRadius(8)
+      .backgroundColor($r('app.color.surface_glass'))
+      .borderRadius(18)
       .border({ width: 1, color: $r('app.color.divider') })
+      .shadow({ radius: 22, color: '#18000000', offsetX: 0, offsetY: 10 })
+      .visualEffect(HdsEffects.createCardLight($r('app.color.primary')))
       .margin({ left: 16, right: 16, bottom: 14 })
 
       TrafficStats({
@@ -848,11 +871,14 @@ export struct HomePage {
 
       Blank()
         .layoutWeight(1)
+      }
+      .width('100%')
+      .height('100%')
+      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_bg'))
-    .alignItems(HorizontalAlign.Center)
     .onAppear(() => {
       this.refreshProfileSummary();
     })

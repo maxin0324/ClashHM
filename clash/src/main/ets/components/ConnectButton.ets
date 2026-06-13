@@ -1,4 +1,5 @@
 import { ConnectState } from '../models/ClashConfig';
+import { HdsEffects } from '../common/HdsEffects';
 
 @Component
 export struct ConnectButton {
@@ -73,13 +74,33 @@ export struct ConnectButton {
   build() {
     Column({ space: 10 }) {
       Stack() {
+        Circle()
+          .width(154)
+          .height(154)
+          .fill(this.getCircleColor())
+          .opacity(this.state === ConnectState.CONNECTED ? 0.15 : 0.10)
+
+        Circle()
+          .width(138)
+          .height(138)
+          .fill($r('app.color.surface_glass'))
+          .opacity(0.88)
+
         Row()
           .width(128)
           .height(128)
           .borderRadius(64)
           .backgroundColor(this.getCircleColor())
           .opacity(this.state === ConnectState.CONNECTING ? 0.84 : 1)
-          .shadow({ radius: 16, color: '#22000000', offsetX: 0, offsetY: 8 })
+          .shadow({ radius: 24, color: '#26000000', offsetX: 0, offsetY: 12 })
+          .visualEffect(HdsEffects.createButtonLight(this.getCircleColor()))
+
+        Circle()
+          .width(92)
+          .height(92)
+          .fill(Color.White)
+          .opacity(this.state === ConnectState.DISCONNECTED ? 0.10 : 0.18)
+          .position({ x: 18, y: 14 })
 
         if (this.state === ConnectState.CONNECTING) {
           this.loadingIcon()
@@ -87,8 +108,8 @@ export struct ConnectButton {
           this.powerIcon()
         }
       }
-      .width(132)
-      .height(132)
+      .width(156)
+      .height(156)
       .scale({ x: this.btnScale, y: this.btnScale })
       .onClick(() => {
         if (this.state === ConnectState.CONNECTING) {
@@ -106,6 +127,8 @@ export struct ConnectButton {
       Text(this.getStatusText())
         .fontSize(13)
         .fontColor($r('app.color.text_secondary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)

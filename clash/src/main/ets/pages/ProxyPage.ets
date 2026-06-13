@@ -408,8 +408,8 @@ export struct ProxyPage {
           .height(34)
           .fontSize(13)
           .fontColor(this.isLoading ? $r('app.color.text_secondary') : $r('app.color.primary'))
-          .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(8)
+          .backgroundColor($r('app.color.surface_glass'))
+          .borderRadius(11)
           .border({ width: 1, color: $r('app.color.divider') })
           .padding({ left: 12, right: 12 })
           .enabled(!this.isLoading)
@@ -433,8 +433,8 @@ export struct ProxyPage {
         }
         .width('90%')
         .padding(24)
-        .backgroundColor($r('app.color.card_bg'))
-        .borderRadius(8)
+        .backgroundColor($r('app.color.surface_glass'))
+        .borderRadius(18)
         .border({ width: 1, color: $r('app.color.divider') })
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
@@ -465,7 +465,7 @@ export struct ProxyPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor($r('app.color.surface_subtle'))
     .alignItems(HorizontalAlign.Center)
   }
 }
